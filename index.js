@@ -1,6 +1,6 @@
 // Wires the speech service into Bonyan's two-phase plugin lifecycle.
 
-import { SERVICE_NAME } from './lib/constants.js';
+import { DEFAULT_ADAPTER, SERVICE_NAME } from './lib/constants.js';
 import { loadEnvironmentAdapter } from './lib/environment-loader.js';
 import { createSpeechService } from './lib/speech-service.js';
 
@@ -21,7 +21,7 @@ export async function prepare(prepareContext) {
   state.config = prepareContext.config ?? {};
   const config = state.config;
   state.adapter = await loadEnvironmentAdapter(
-    config.adapter,
+    config.adapter ?? DEFAULT_ADAPTER,
     config.adapterConfig ?? {},
   );
   lifecycle = createSpeechService(state);

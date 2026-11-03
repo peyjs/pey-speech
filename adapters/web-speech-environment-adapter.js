@@ -27,6 +27,10 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
     return globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition ?? null;
   }
 
+  // The adapter knows its own active session so the service can stop it
+  // without holding the per-session control.
+  let activeStop = null;
+
   return {
     /**
      * Reports support and, when the system says so, where processing
@@ -36,7 +40,7 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
      */
     isSupported() {
       const supported = recognizerCtor() !== null;
-      return { supported, processing: supported ? 'unknown' : 'unknown' };
+      return { supported, processing: 'unknown' };
     },
 
     /**
@@ -85,6 +89,7 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
           return;
         }
         ended = true;
+        activeStop = null;
         try {
           recognition?.abort?.();
         } catch {
@@ -145,7 +150,7 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
         finish({ reason: 'error', code: 'SPEECH_SERVICE_UNAVAILABLE' });
       }
 
-      return {
+      const control = {
         stop: ({ flush }) => {
           if (flush && lastFinal !== null) {
             finish({ reason: 'speech', text: lastFinal });
@@ -154,6 +159,19 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
           finish({ reason: 'cancelled' });
         },
       };
+      activeStop = control;
+      return control;
+    },
+
+    /**
+     * Stops the adapter's active session (the service's session-level
+     * control also works; this keeps the adapter contract complete).
+     *
+     * @param {{flush: boolean}} options Whether to deliver the last result.
+     * @returns {void}
+     */
+    stop(options = { flush: false }) {
+      activeStop?.stop(options);
     },
   };
 }
