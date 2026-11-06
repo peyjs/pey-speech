@@ -32,7 +32,17 @@ function createFakeAdapter({ supported = true, processing = 'cloud', granted = t
           input.end(report);
         }
       };
+      const control = {
+        stop: ({ flush }) => {
+          if (flush && lastFinal !== null) {
+            finish({ reason: 'speech', text: lastFinal });
+            return;
+          }
+          finish({ reason: 'cancelled' });
+        },
+      };
       session = {
+        control,
         emitPartial: (text) => input.onPartial?.(text),
         emitFinal: (text) => {
           lastFinal = text;
@@ -42,15 +52,11 @@ function createFakeAdapter({ supported = true, processing = 'cloud', granted = t
         emitError: (code) => finish({ reason: 'error', code }),
         emitDeviceEnd: () => finish({ reason: lastFinal !== null ? 'speech' : 'no-speech', text: lastFinal }),
       };
-      return {
-        stop: ({ flush }) => {
-          if (flush && lastFinal !== null) {
-            finish({ reason: 'speech', text: lastFinal });
-            return;
-          }
-          finish({ reason: 'cancelled' });
-        },
-      };
+      return control;
+    },
+    stop(options = { flush: false }) {
+      calls.push('stop');
+      session?.control?.stop(options);
     },
   };
   return {
@@ -69,6 +75,16 @@ function createService({ config, adapterOptions } = {}) {
     config: config ?? {},
   });
   return { service, deactivate, published, ...fake };
+}
+
+function createServiceWithAdapter(adapter, { config } = {}) {
+  const published = [];
+  const { service, deactivate } = createSpeechService({
+    adapter,
+    events: { publish: (type, data) => published.push({ type, data }) },
+    config: config ?? {},
+  });
+  return { service, deactivate, published };
 }
 
 // --- support and permission ----------------------------------------------
@@ -233,4 +249,75 @@ test('should_never_put_recognized_text_into_events', async () => {
   await handle.done;
 
   assert.equal(JSON.stringify(published).includes('متن محرمانه گفتار'), false);
+});
+
+test('should_start_a_new_session_after_a_synchronous_start_failure', async () => {
+  let attempts = 0;
+  const fake = createFakeAdapter();
+  const healthyStart = fake.adapter.start.bind(fake);
+  fake.adapter.start = (input) => {
+    attempts += 1;
+    if (attempts === 1) {
+      // Simulate the adapter's sync failure: end fires, dead control returns.
+      input.end({ reason: 'error', code: 'SPEECH_SERVICE_UNAVAILABLE' });
+      return { stop: () => {} };
+    }
+    return healthyStart(input);
+  };
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  const failed = await service.listen({}, {});
+  await failed.done;
+
+  const second = await service.listen({}, {});
+  assert.notEqual(second, undefined, 'the session lock must not be wedged');
+  second.cancel();
+  await second.done;
+});
+
+test('should_not_publish_started_after_stopped_when_start_fails_synchronously', async () => {
+  const fake = createFakeAdapter();
+  fake.adapter.start = (input) => {
+    input.end({ reason: 'error', code: 'SPEECH_SERVICE_UNAVAILABLE' });
+    return { stop: () => {} };
+  };
+  const { service, published } = createServiceWithAdapter(fake.adapter);
+
+  const handle = await service.listen({}, {});
+  await handle.done;
+
+  const types = published.map((event) => event.type);
+  assert.equal(types.filter((type) => type === 'speech:listening-started').length, 0, 'no started after a sync failure');
+  assert.equal(types.filter((type) => type === 'speech:listening-stopped').length, 1);
+});
+
+test('should_not_let_a_stale_handle_cancel_a_newer_session', async () => {
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  const first = await service.listen({}, {});
+  fake.session().emitFinal('نتیجه اول');
+  fake.session().emitDeviceEnd();
+  await first.done;
+
+  const second = await service.listen({}, {});
+  // The stale handle from the finished first session must be a no-op now.
+  first.cancel();
+
+  // The second session runs to its own natural end.
+  fake.session().emitFinal('نتیجه دوم');
+  fake.session().emitDeviceEnd();
+  const final = await second.done;
+
+  assert.equal(final.ending, 'completed', 'the second session must survive the stale handle');
+  assert.equal(final.text, 'نتیجه دوم');
+});
+
+test('should_reject_stop_with_the_standard_error_after_deactivation', async () => {
+  const fake = createFakeAdapter();
+  const { service, deactivate } = createServiceWithAdapter(fake.adapter);
+
+  deactivate();
+
+  assert.throws(() => service.stop(), (error) => error.code === 'SERVICE_UNAVAILABLE');
 });

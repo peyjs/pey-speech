@@ -126,7 +126,11 @@ export function createWebSpeechEnvironmentAdapter(adapterConfig = {}) {
       };
 
       recognition.onerror = (event) => {
-        const mapped = DEVICE_ERROR_CODES[event?.error] ?? 'SPEECH_SERVICE_UNAVAILABLE';
+        // `?? '...'` would swallow the deliberate-stop `null` entry, so the
+        // table is read with an ownership check instead.
+        const known = event?.error !== undefined
+          && Object.prototype.hasOwnProperty.call(DEVICE_ERROR_CODES, event.error);
+        const mapped = known ? DEVICE_ERROR_CODES[event.error] : 'SPEECH_SERVICE_UNAVAILABLE';
         if (mapped === null) {
           return; // a deliberate stop lands through onend
         }

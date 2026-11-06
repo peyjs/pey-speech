@@ -25,7 +25,7 @@
           "description": "Asks for the microphone/speech permission explicitly (never at startup) and reports the outcome.",
           "params": [],
           "returns": "{ granted: boolean }",
-          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_PERMISSION_DENIED", "SERVICE_UNAVAILABLE"]
+          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_PERMISSION_DENIED", "SERVICE_UNAVAILABLE", "SPEECH_SERVICE_UNAVAILABLE"]
         },
         {
           "name": "listen",
@@ -35,7 +35,7 @@
             { "name": "handlers", "type": "{ onPartial: (text: string) => void, onFinal: (text: string) => void }" }
           ],
           "returns": "Promise<{ stop: () => void, cancel: () => void, done: Promise<{ ending: 'completed', text: string | null } | { ending: 'interrupted', error: object } | { ending: 'cancelled' }> }>",
-          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_SESSION_ACTIVE", "SERVICE_UNAVAILABLE"]
+          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_SESSION_ACTIVE", "SERVICE_UNAVAILABLE", "SPEECH_SERVICE_UNAVAILABLE"]
         },
         {
           "name": "stop",
