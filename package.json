@@ -1,6 +1,6 @@
 {
   "name": "pey.speech",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Device speech recognition as a platform capability behind a swappable environment adapter (Web Speech API today): support check, permission, listening sessions with partial and final results",
   "exports": {
