@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_LANGUAGE, ERROR_CODES, LISTENING_STARTED_EVENT, LISTENING_STOPPED_EVENT } from '../lib/constants.js';
+import { DEFAULT_LANGUAGE, ERROR_CODES, LISTENING_STARTED_EVENT, LISTENING_STOPPED_EVENT, SERVICE_UNAVAILABLE } from '../lib/constants.js';
 
 test('should_default_the_language_to_persian_when_nothing_is_configured', () => {
   assert.equal(DEFAULT_LANGUAGE, 'fa-IR');
@@ -18,4 +18,12 @@ test('should_keep_every_speech_error_code_prefixed_when_listed', () => {
   for (const code of Object.values(ERROR_CODES)) {
     assert.match(code, /^SPEECH_[A-Z_]+$/, code);
   }
+});
+
+test('should_export_the_standard_bare_deactivation_code_when_the_plugin_deactivates', () => {
+  // Deliberate: SERVICE_UNAVAILABLE is the architecture-wide deactivation
+  // code every plugin reports after shutdown (pey-prefs, pey-chat, pey-llm
+  // use the same bare code), so hosts branch on one stable name. It lives
+  // outside ERROR_CODES by design — this test keeps it locked anyway.
+  assert.equal(SERVICE_UNAVAILABLE, 'SERVICE_UNAVAILABLE');
 });

@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebSpeechEnvironmentAdapter } from '../../adapters/web-speech-environment-adapter.js';
+import { createFakeAdapter } from '../speech-service.test.js';
 import { createContractAdapter } from '../fake-contract-adapter.js';
 
 /**
@@ -71,3 +72,7 @@ export function runAdapterContractSuite(kind, factory) {
 
 runAdapterContractSuite('web-speech', () => createWebSpeechEnvironmentAdapter());
 runAdapterContractSuite('fake', () => createContractAdapter());
+
+// The service-level fake is a third full implementation of the contract:
+// it must satisfy the same suite the real adapter passes.
+runAdapterContractSuite('service-fake', () => createFakeAdapter().adapter);

@@ -3,13 +3,14 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ERROR_CODES } from '../lib/constants.js';
 import { createSpeechService } from '../lib/speech-service.js';
 
 /**
  * Builds a fake environment adapter: a controllable recognizer whose
  * session the test drives by hand.
  */
-function createFakeAdapter({ supported = true, processing = 'cloud', granted = true } = {}) {
+export function createFakeAdapter({ supported = true, processing = 'cloud', granted = true } = {}) {
   const calls = [];
   let session = null;
   const adapter = {
@@ -77,11 +78,11 @@ function createService({ config, adapterOptions } = {}) {
   return { service, deactivate, published, ...fake };
 }
 
-function createServiceWithAdapter(adapter, { config } = {}) {
+function createServiceWithAdapter(adapter, { config, events } = {}) {
   const published = [];
   const { service, deactivate } = createSpeechService({
     adapter,
-    events: { publish: (type, data) => published.push({ type, data }) },
+    events: events ?? { publish: (type, data) => published.push({ type, data }) },
     config: config ?? {},
   });
   return { service, deactivate, published };
@@ -320,4 +321,76 @@ test('should_reject_stop_with_the_standard_error_after_deactivation', async () =
   deactivate();
 
   assert.throws(() => service.stop(), (error) => error.code === 'SERVICE_UNAVAILABLE');
+});
+
+// --- second review pass: adapter contract hygiene --------------------------
+
+test('should_resolve_done_as_a_recognizer_failure_when_the_adapter_reports_an_invalid_code', async () => {
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  const handle = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
+  fake.session().emitError('microphone.locked');
+  const final = await handle.done;
+
+  assert.equal(final.ending, 'interrupted');
+  assert.equal(final.error.code, ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER, 'a malformed adapter code falls back to the safe code');
+});
+
+test('should_map_raw_adapter_failures_to_structured_errors_when_isSupported_or_stop_throw', async () => {
+  const fake = createFakeAdapter();
+  fake.adapter.isSupported = () => {
+    throw new Error('raw device boom');
+  };
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  // getSupport is a synchronous method: it throws in place.
+  assert.throws(
+    () => service.getSupport(),
+    (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER && error.source === 'pey.speech',
+  );
+
+  const healthy = createFakeAdapter();
+  const failingStop = createServiceWithAdapter(healthy.adapter);
+  await failingStop.service.listen({}, {});
+  // The service stop goes through the SESSION control, not the adapter's
+  // own stop method — break exactly that link.
+  healthy.session().control.stop = () => {
+    throw new Error('raw stop boom');
+  };
+
+  // stop() is synchronous as well.
+  assert.throws(
+    () => failingStop.service.stop(),
+    (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER,
+  );
+});
+
+test('should_resolve_done_as_a_recognizer_failure_when_the_device_stop_throws_at_the_handle', async () => {
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  const handle = await service.listen({}, {});
+  fake.session().control.stop = () => {
+    throw new Error('raw stop boom');
+  };
+  handle.cancel();
+
+  const final = await handle.done;
+  assert.equal(final.ending, 'interrupted');
+  assert.equal(final.error.code, ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER, 'done must never hang on a throwing device stop');
+});
+
+test('should_still_succeed_when_the_event_bus_throws_on_every_publish', async () => {
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter, {
+    events: { publish: () => { throw new Error('bus down'); } },
+  });
+
+  const handle = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
+  fake.session().emitFinal('نتیجه');
+  fake.session().emitDeviceEnd();
+  const final = await handle.done;
+
+  assert.equal(final.ending, 'completed', 'a broken bus must never fail a listening session');
 });

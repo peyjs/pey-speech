@@ -2,6 +2,13 @@
 
 ## [1.0.1] - 1405-08-15
 
+### Fixed (second review pass)
+
+- A malformed error code in an adapter's end report no longer crashes the error factory (leaving `done` pending forever): the code is shape-checked and falls back to `SPEECH_SERVICE_UNAVAILABLE`.
+- Raw adapter failures can no longer cross the boundary: `isSupported`, the session stop (handle, service `stop`) and `deactivate` are all guarded — a throwing device stop resolves `done` as a recognizer failure, and `deactivate` can never break the shutdown cycle.
+- `stop` declares `SERVICE_UNAVAILABLE` in the manifest and the reference; the stale `PLUGIN_VERSION` constant and the stale README version badge are gone; the bare `SERVICE_UNAVAILABLE` deactivation code is explicitly locked in the constants test (architecture-wide standard, shared with pey-prefs/pey-chat/pey-llm).
+- The adapter contract suite now also runs against the service-level fake; new adapter tests cover the permission grant with track release, `resultIndex` handling with cumulative results, and the undefined-error mapping.
+
 ### Fixed
 
 - A recognizer that failed to start synchronously wedged the session lock forever and published `listening-started` after `listening-stopped` — the service now detects the already-ended session and refuses to re-arm it.

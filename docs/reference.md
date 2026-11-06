@@ -51,7 +51,7 @@ Explicitly asks for the microphone/speech permission — never at startup. Resol
 
 Starts the one allowed session: `onPartial` delivers interim transcriptions while the user speaks, `onFinal` delivers settled phrases. The language defaults to the configured one and can be overridden per call. Resolves to the session handle — the shared flow pattern:
 
-- `stop()` — finish and deliver: the ending is `completed` with the last final transcription, or `cancelled` when nothing was recognized.
+- `stop()` — finish and deliver: the ending is `completed` with the last final transcription, or `cancelled` when nothing was recognized. Throws `SERVICE_UNAVAILABLE` after deactivation (like every method).
 - `cancel()` — stop without a result.
 - `done` — never rejects; resolves exactly one of three endings:
   - `{ ending: 'completed', text: string | null }`

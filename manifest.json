@@ -42,7 +42,7 @@
           "description": "Finishes the active session and delivers the result: the ending is completed with the last final transcription, or cancelled when nothing was recognized.",
           "params": [],
           "returns": "{ ok: boolean }",
-          "errors": []
+          "errors": ["SERVICE_UNAVAILABLE"]
         }
       ]
     }

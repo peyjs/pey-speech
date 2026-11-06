@@ -273,3 +273,73 @@ test('should_end_with_the_service_unavailable_code_when_start_throws', () => {
     fake.uninstall();
   }
 });
+
+test('should_grant_permission_and_release_the_tracks_when_media_devices_exist', async () => {
+  const stopped = [];
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia: async () => ({
+          getTracks: () => [{ stop: () => stopped.push('track') }],
+        }),
+      },
+    },
+  });
+  try {
+    const adapter = createWebSpeechEnvironmentAdapter();
+
+    assert.deepEqual(await adapter.requestPermission(), { granted: true });
+    assert.deepEqual(stopped, ['track'], 'the probe tracks are released right away');
+  } finally {
+    delete globalThis.navigator;
+  }
+});
+
+test('should_honor_resultIndex_and_mix_final_and_interim_results_in_one_event', () => {
+  const fake = installFakeRecognizer();
+  try {
+    const adapter = createWebSpeechEnvironmentAdapter();
+    const partials = [];
+    const finals = [];
+    const { reports } = startSession(adapter, {
+      onPartial: (text) => partials.push(text),
+      onFinal: (text) => finals.push(text),
+    });
+    const recognition = fake.first();
+
+    // The event carries an already-consumed final at index 0 and a live
+    // interim at index 1; resultIndex must start reading at index 1, so the
+    // stale final is not re-delivered but the fresh interim is.
+    recognition.emitResult([
+      ['قدیم', true],
+      ['در حال گفتن', false],
+    ], 1);
+
+    assert.deepEqual(finals, [], 'the consumed final at index 0 must not be re-delivered');
+    assert.deepEqual(partials, ['در حال گفتن']);
+    // The results list is cumulative in real Web Speech events: the second
+    // event carries every result so far, with resultIndex at the new one.
+    recognition.emitResult([['قدیم', true], ['در حال گفتن', false], ['در حال گفتن کامل', true]], 2);
+    assert.deepEqual(finals, ['در حال گفتن کامل']);
+    recognition.emitEnd();
+    assert.deepEqual(reports, [{ reason: 'speech', text: 'در حال گفتن کامل' }]);
+  } finally {
+    fake.uninstall();
+  }
+});
+
+test('should_map_an_undefined_error_name_to_the_recognizer_failure_code', () => {
+  const fake = installFakeRecognizer();
+  try {
+    const adapter = createWebSpeechEnvironmentAdapter();
+    const { reports } = startSession(adapter);
+
+    fake.first().emitError(undefined);
+
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+  } finally {
+    fake.uninstall();
+  }
+});
