@@ -41,7 +41,7 @@ The service `pey.speech.service` provides four methods.
 
 ### `getSupport()`
 
-`{ supported, processing }` — `processing` is `'local'` or `'cloud'` when the system says so, `'unknown'` otherwise (the Web Speech API never says). Throws `SERVICE_UNAVAILABLE` after deactivation.
+`{ supported, processing }` — `processing` is `'local'` or `'cloud'` when the system says so, `'unknown'` otherwise (the Web Speech API never says). Throws `SERVICE_UNAVAILABLE` after deactivation and `SPEECH_SERVICE_UNAVAILABLE` when the recognizer itself fails while reporting its support.
 
 ### `requestPermission()`
 
@@ -84,7 +84,7 @@ These exist only so the UI can show the microphone state; recognized text and au
 | `SPEECH_SESSION_ACTIVE` | A second session was requested while one is active. | operational |
 | `SERVICE_UNAVAILABLE` | Called after deactivation/shutdown; the running session is cut without a result. | operational |
 
-Raw device errors never leave the adapter; branch on `code`, never on `message`.
+Raw device errors never leave the adapter; branch on `code`, never on `message`. A code an adapter reports through the session end is honored only when it is one of the codes declared above — anything else (however well-formed) surfaces as `SPEECH_SERVICE_UNAVAILABLE`, so callers never see an undeclared code.
 
 ## Config
 

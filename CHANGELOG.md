@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0] - 1405-08-17
+
+Round-2 and round-3 review fixes. MINOR because new error paths are declared and the adapter-code contract is now enforced.
+
+### Fixed
+
+- `assertSupported` guards `adapter.isSupported()` like `getSupport` does: a throwing adapter no longer leaks a raw error through `listen` / `requestPermission`, and a non-object report is treated as unsupported instead of crashing.
+- The service-level `stop` closes the session when the device stop throws (same policy as the handle path): `done` resolves as a recognizer failure and the session lock frees, instead of wedging the session forever.
+- A code reported by the adapter through the session end is honored only when it is one of the plugin's declared codes — well-formed but undeclared codes (e.g. `MICROPHONE_HARDWARE_LOCKED`) surface as `SPEECH_SERVICE_UNAVAILABLE`, so callers never branch on an unknown code.
+- `getSupport` declares `SPEECH_SERVICE_UNAVAILABLE` in the manifest and the reference (new error path introduced by the guarded support report).
+
+### Tests
+
+- The adapter-failure test now covers `listen` / `requestPermission` with a throwing `isSupported` and the null-report case; new tests lock the undeclared-code mapping and the never-throwing `deactivate` (91 tests).
+
 ## [1.0.1] - 1405-08-15
 
 ### Fixed (second review pass)

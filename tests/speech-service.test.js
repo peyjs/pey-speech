@@ -352,18 +352,70 @@ test('should_map_raw_adapter_failures_to_structured_errors_when_isSupported_or_s
 
   const healthy = createFakeAdapter();
   const failingStop = createServiceWithAdapter(healthy.adapter);
-  await failingStop.service.listen({}, {});
+  const stuckHandle = await failingStop.service.listen({}, {});
   // The service stop goes through the SESSION control, not the adapter's
   // own stop method — break exactly that link.
   healthy.session().control.stop = () => {
     throw new Error('raw stop boom');
   };
 
-  // stop() is synchronous as well.
+  // stop() is synchronous as well — and closes the session before
+  // reporting the failure, exactly like the handle path does.
   assert.throws(
     () => failingStop.service.stop(),
     (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER,
   );
+  const stopped = await stuckHandle.done;
+  assert.equal(stopped.ending, 'interrupted', 'done never hangs after a failing service stop');
+  await failingStop.service.listen({}, {});
+
+  // The same guard covers listen and requestPermission: a throwing
+  // isSupported never leaks a raw error through either entry.
+  await assert.rejects(
+    () => service.listen({}, {}),
+    (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER,
+  );
+  await assert.rejects(
+    () => service.requestPermission(),
+    (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER,
+  );
+
+  // A non-object support report means "no usable report": treated as
+  // unsupported, never dereferenced into a TypeError.
+  const nullish = createFakeAdapter();
+  nullish.adapter.isSupported = () => null;
+  const nullishSession = createServiceWithAdapter(nullish.adapter);
+  await assert.rejects(
+    () => nullishSession.service.listen({}, {}),
+    (error) => error.code === ERROR_CODES.UNSUPPORTED,
+  );
+});
+
+test('should_map_an_undeclared_but_well_formed_adapter_code_to_the_safe_recognizer_failure_when_the_session_ends', async () => {
+  // The manifest declares which codes listen may surface: an adapter code
+  // outside that set never reaches the caller, however well-formed.
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter);
+
+  const handle = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
+  fake.session().emitError('MICROPHONE_HARDWARE_LOCKED');
+  const final = await handle.done;
+
+  assert.equal(final.ending, 'interrupted');
+  assert.equal(final.error.code, ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER, 'an undeclared code falls back to the safe code');
+});
+
+test('should_deactivate_without_throwing_when_the_adapter_stop_fails', async () => {
+  // Teardown must never break the Core shutdown cycle, even when the
+  // device stop itself throws.
+  const fake = createFakeAdapter();
+  const { service, deactivate } = createServiceWithAdapter(fake.adapter);
+  await service.listen({}, {});
+  fake.session().control.stop = () => {
+    throw new Error('raw stop boom');
+  };
+
+  assert.doesNotThrow(() => deactivate());
 });
 
 test('should_resolve_done_as_a_recognizer_failure_when_the_device_stop_throws_at_the_handle', async () => {
