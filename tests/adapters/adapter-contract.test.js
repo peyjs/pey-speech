@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebSpeechEnvironmentAdapter } from '../../adapters/web-speech-environment-adapter.js';
-import { createFakeAdapter } from '../speech-service.test.js';
+import { createFakeAdapter } from '../fake-service-adapter.js';
 import { createContractAdapter } from '../fake-contract-adapter.js';
 
 /**

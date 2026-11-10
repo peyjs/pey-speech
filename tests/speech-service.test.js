@@ -5,68 +5,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ERROR_CODES } from '../lib/constants.js';
 import { createSpeechService } from '../lib/speech-service.js';
+import { createFakeAdapter } from './fake-service-adapter.js';
 
 /**
  * Builds a fake environment adapter: a controllable recognizer whose
  * session the test drives by hand.
  */
-export function createFakeAdapter({ supported = true, processing = 'cloud', granted = true } = {}) {
-  const calls = [];
-  let session = null;
-  const adapter = {
-    calls,
-    isSupported() {
-      calls.push('isSupported');
-      return { supported, processing };
-    },
-    async requestPermission() {
-      calls.push('requestPermission');
-      return { granted };
-    },
-    start(input) {
-      calls.push({ start: input.language });
-      let ended = false;
-      let lastFinal = null;
-      const finish = (report) => {
-        if (!ended) {
-          ended = true;
-          input.end(report);
-        }
-      };
-      const control = {
-        stop: ({ flush }) => {
-          if (flush && lastFinal !== null) {
-            finish({ reason: 'speech', text: lastFinal });
-            return;
-          }
-          finish({ reason: 'cancelled' });
-        },
-      };
-      session = {
-        control,
-        emitPartial: (text) => input.onPartial?.(text),
-        emitFinal: (text) => {
-          lastFinal = text;
-          input.onFinal?.(text);
-        },
-        emitNoSpeech: () => finish({ reason: 'no-speech' }),
-        emitError: (code) => finish({ reason: 'error', code }),
-        emitDeviceEnd: () => finish({ reason: lastFinal !== null ? 'speech' : 'no-speech', text: lastFinal }),
-      };
-      return control;
-    },
-    stop(options = { flush: false }) {
-      calls.push('stop');
-      session?.control?.stop(options);
-    },
-  };
-  return {
-    adapter,
-    session: () => session,
-    calls,
-  };
-}
-
 function createService({ config, adapterOptions } = {}) {
   const published = [];
   const fake = createFakeAdapter(adapterOptions);
@@ -288,8 +232,30 @@ test('should_not_publish_started_after_stopped_when_start_fails_synchronously', 
   await handle.done;
 
   const types = published.map((event) => event.type);
+  // A session the device aborts inside start() never started: neither
+  // event fires for it — "stopped without started" is an invalid sequence
+  // for a microphone-state UI.
   assert.equal(types.filter((type) => type === 'speech:listening-started').length, 0, 'no started after a sync failure');
-  assert.equal(types.filter((type) => type === 'speech:listening-stopped').length, 1);
+  assert.equal(types.filter((type) => type === 'speech:listening-stopped').length, 0, 'no stopped for a session that never started');
+});
+
+test('should_publish_no_events_when_start_throws_without_reporting_an_end', async () => {
+  // The other same-window failure shape (start only throws): identical
+  // event behavior to the end-then-throw shape — silence, no pairing.
+  const fake = createFakeAdapter();
+  fake.adapter.start = () => {
+    throw new Error('raw device boom');
+  };
+  const { service, published } = createServiceWithAdapter(fake.adapter);
+
+  await assert.rejects(
+    () => service.listen({}, {}),
+    (error) => error.code === ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER,
+  );
+
+  const types = published.map((event) => event.type);
+  assert.equal(types.filter((type) => type === 'speech:listening-started').length, 0);
+  assert.equal(types.filter((type) => type === 'speech:listening-stopped').length, 0);
 });
 
 test('should_not_let_a_stale_handle_cancel_a_newer_session', async () => {

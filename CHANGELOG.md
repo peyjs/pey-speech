@@ -9,7 +9,10 @@ Round-2 and round-3 review fixes. MINOR because new error paths are declared and
 - `deactivate` with a throwing device stop now settles the session (`done` resolves as `cancelled`, `speech:listening-stopped` fires) instead of leaving the caller's `done` pending forever; the raw failure stays swallowed so the Core teardown cycle is never broken.
 - `getSupport` shapes the adapter report into exactly the declared `{ supported, processing }`: non-object/non-boolean reports read as unsupported, an undeclared `processing` falls back to `'unknown'`.
 - The configured default language is trimmed like the per-call override.
-- `stop` declares `SPEECH_SERVICE_UNAVAILABLE` in the manifest and the reference (95 tests).
+- `stop` declares `SPEECH_SERVICE_UNAVAILABLE` in the manifest and the reference (72 real tests — an earlier count of 95 came from the contract suite double-running the service test file).
+- A session the device aborts inside `start()` publishes NO events (neither `listening-started` nor `listening-stopped`): "stopped without started" was an invalid sequence for a microphone-state UI, and the two same-window failure shapes now behave identically (tests lock both).
+- The service-level adapter fake moved to `tests/fake-service-adapter.js` — the contract suite used to import the service test file itself, double-running all of its tests on every run (test file imports test file).
+- The reference no longer claims the handle's `stop()` throws `SERVICE_UNAVAILABLE` after deactivation (it is a no-op on a closed session; only service-level methods throw), and `requestPermission` lists all four of its declared codes.
 - `assertSupported` guards `adapter.isSupported()` like `getSupport` does: a throwing adapter no longer leaks a raw error through `listen` / `requestPermission`, and a non-object report is treated as unsupported instead of crashing.
 - The service-level `stop` closes the session when the device stop throws (same policy as the handle path): `done` resolves as a recognizer failure and the session lock frees, instead of wedging the session forever.
 - A code reported by the adapter through the session end is honored only when it is one of the plugin's declared codes — well-formed but undeclared codes (e.g. `MICROPHONE_HARDWARE_LOCKED`) surface as `SPEECH_SERVICE_UNAVAILABLE`, so callers never branch on an unknown code.
@@ -17,7 +20,7 @@ Round-2 and round-3 review fixes. MINOR because new error paths are declared and
 
 ### Tests
 
-- The adapter-failure test now covers `listen` / `requestPermission` with a throwing `isSupported` and the null-report case; new tests lock the undeclared-code mapping and the never-throwing `deactivate` (91 tests).
+- The adapter-failure test now covers `listen` / `requestPermission` with a throwing `isSupported` and the null-report case; new tests lock the undeclared-code mapping and the never-throwing `deactivate`.
 
 ## [1.0.1] - 1405-08-15
 
