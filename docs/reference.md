@@ -62,7 +62,7 @@ A second session while one is active throws `SPEECH_SESSION_ACTIVE`. Long silenc
 
 ### `stop()`
 
-Service-level finish of the active session (same as the handle's `stop`). A no-op when nothing is active.
+Service-level finish of the active session (same as the handle's `stop`). A no-op when nothing is active. When the device stop itself fails, the session is still closed (`done` resolves as a recognizer failure) and `SPEECH_SERVICE_UNAVAILABLE` is thrown. Also throws `SERVICE_UNAVAILABLE` after deactivation.
 
 ## Events
 

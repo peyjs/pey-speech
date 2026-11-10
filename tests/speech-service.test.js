@@ -405,17 +405,55 @@ test('should_map_an_undeclared_but_well_formed_adapter_code_to_the_safe_recogniz
   assert.equal(final.error.code, ERROR_CODES.SERVICE_UNAVAILABLE_RECOGNIZER, 'an undeclared code falls back to the safe code');
 });
 
-test('should_deactivate_without_throwing_when_the_adapter_stop_fails', async () => {
+test('should_deactivate_without_throwing_and_settle_the_session_when_the_adapter_stop_fails', async () => {
   // Teardown must never break the Core shutdown cycle, even when the
-  // device stop itself throws.
+  // device stop itself throws — and the session must still settle: done
+  // resolves and listening-stopped fires, or the caller hangs forever.
   const fake = createFakeAdapter();
-  const { service, deactivate } = createServiceWithAdapter(fake.adapter);
-  await service.listen({}, {});
+  const { service, deactivate, published } = createServiceWithAdapter(fake.adapter);
+  const handle = await service.listen({}, {});
   fake.session().control.stop = () => {
     throw new Error('raw stop boom');
   };
 
   assert.doesNotThrow(() => deactivate());
+
+  const final = await handle.done;
+  assert.equal(final.ending, 'cancelled', 'deactivation settles the session without a result');
+  assert.ok(published.some((event) => event.type === 'speech:listening-stopped'), 'the stopped event still fires');
+  await assert.rejects(
+    () => service.listen({}, {}),
+    (error) => error.code === 'SERVICE_UNAVAILABLE',
+  );
+});
+
+test('should_normalize_an_unusable_support_report_when_the_adapter_returns_garbage', () => {
+  // The adapter is configurable third-party code: a null/non-object report
+  // or a non-boolean `supported` never reaches the caller as-is, and an
+  // undeclared `processing` value falls back to 'unknown'.
+  for (const garbage of [null, undefined, 42, {}, { supported: 'yes' }]) {
+    const fake = createFakeAdapter();
+    fake.adapter.isSupported = () => garbage;
+    const { service } = createServiceWithAdapter(fake.adapter);
+    assert.deepEqual(service.getSupport(), { supported: false, processing: 'unknown' });
+  }
+  const oddProcessing = createFakeAdapter();
+  oddProcessing.adapter.isSupported = () => ({ supported: true, processing: 'quantum' });
+  const oddSession = createServiceWithAdapter(oddProcessing.adapter);
+  assert.deepEqual(oddSession.service.getSupport(), { supported: true, processing: 'unknown' });
+});
+
+test('should_trim_the_configured_default_language_like_the_per_call_override', async () => {
+  // Both language paths reach the adapter identically: a padded config
+  // value is trimmed, not passed through with its whitespace.
+  const fake = createFakeAdapter();
+  const { service } = createServiceWithAdapter(fake.adapter, { config: { language: '  fa-IR  ' } });
+
+  await service.listen({}, {});
+
+  const startCall = fake.calls.find((call) => typeof call === 'object' && call.start !== undefined);
+  assert.notEqual(startCall, undefined, 'the session started through the adapter');
+  assert.equal(startCall.start, 'fa-IR', 'the configured language is trimmed like the per-call override');
 });
 
 test('should_resolve_done_as_a_recognizer_failure_when_the_device_stop_throws_at_the_handle', async () => {

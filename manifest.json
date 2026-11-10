@@ -18,31 +18,53 @@
           "description": "Reports whether speech recognition works in this environment and, when the system says so, whether processing happens on the device or in the cloud ('local' | 'cloud'), or 'unknown' when it cannot be told.",
           "params": [],
           "returns": "{ supported: boolean, processing: 'local' | 'cloud' | 'unknown' }",
-          "errors": ["SERVICE_UNAVAILABLE", "SPEECH_SERVICE_UNAVAILABLE"]
+          "errors": [
+            "SERVICE_UNAVAILABLE",
+            "SPEECH_SERVICE_UNAVAILABLE"
+          ]
         },
         {
           "name": "requestPermission",
           "description": "Asks for the microphone/speech permission explicitly (never at startup) and reports the outcome.",
           "params": [],
           "returns": "{ granted: boolean }",
-          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_PERMISSION_DENIED", "SERVICE_UNAVAILABLE", "SPEECH_SERVICE_UNAVAILABLE"]
+          "errors": [
+            "SPEECH_UNSUPPORTED",
+            "SPEECH_PERMISSION_DENIED",
+            "SERVICE_UNAVAILABLE",
+            "SPEECH_SERVICE_UNAVAILABLE"
+          ]
         },
         {
           "name": "listen",
           "description": "Starts one listening session in the given language (the configured default otherwise): partial transcriptions while the user speaks and the final transcription when a phrase settles. A second session while one is active is rejected. Long silence ends the session on the device's own terms and surfaces as interrupted with the no-speech code.",
           "params": [
-            { "name": "input", "type": "{ language?: string }" },
-            { "name": "handlers", "type": "{ onPartial: (text: string) => void, onFinal: (text: string) => void }" }
+            {
+              "name": "input",
+              "type": "{ language?: string }"
+            },
+            {
+              "name": "handlers",
+              "type": "{ onPartial: (text: string) => void, onFinal: (text: string) => void }"
+            }
           ],
           "returns": "Promise<{ stop: () => void, cancel: () => void, done: Promise<{ ending: 'completed', text: string | null } | { ending: 'interrupted', error: object } | { ending: 'cancelled' }> }>",
-          "errors": ["SPEECH_UNSUPPORTED", "SPEECH_SESSION_ACTIVE", "SERVICE_UNAVAILABLE", "SPEECH_SERVICE_UNAVAILABLE"]
+          "errors": [
+            "SPEECH_UNSUPPORTED",
+            "SPEECH_SESSION_ACTIVE",
+            "SERVICE_UNAVAILABLE",
+            "SPEECH_SERVICE_UNAVAILABLE"
+          ]
         },
         {
           "name": "stop",
           "description": "Finishes the active session and delivers the result: the ending is completed with the last final transcription, or cancelled when nothing was recognized.",
           "params": [],
           "returns": "{ ok: boolean }",
-          "errors": ["SERVICE_UNAVAILABLE"]
+          "errors": [
+            "SERVICE_UNAVAILABLE",
+            "SPEECH_SERVICE_UNAVAILABLE"
+          ]
         }
       ]
     }
