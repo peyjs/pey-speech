@@ -1,8 +1,8 @@
 # Changelog
 
-## [1.1.0] - 1405-08-17
+## [1.1.0] - 1405-08-19
 
-Round-2 and round-3 review fixes. MINOR because new error paths are declared and the adapter-code contract is now enforced.
+Round-2 through round-6 review fixes (all unpublished; one release). MINOR because new error paths are declared and the adapter-code contract is now enforced.
 
 ### Fixed
 

@@ -8,8 +8,7 @@ import { createSpeechService } from '../lib/speech-service.js';
 import { createFakeAdapter } from './fake-service-adapter.js';
 
 /**
- * Builds a fake environment adapter: a controllable recognizer whose
- * session the test drives by hand.
+ * Builds the service harness over the shared fake adapter.
  */
 function createService({ config, adapterOptions } = {}) {
   const published = [];
