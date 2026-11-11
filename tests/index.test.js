@@ -37,7 +37,7 @@ test('should_register_service_when_prepare_is_called', async () => {
   assert.equal(typeof context.onDeactivated, 'function');
 });
 
-test('should_load_the_default_adapter_even_in_an_unsupported_environment', async () => {
+test('should_load_the_default_adapter_even_when_the_environment_is_unsupported', async () => {
   // Node has no Web Speech API: the adapter loads anyway and reports
   // unsupported — the host app must not break.
   const context = createPrepareContext();
@@ -46,7 +46,7 @@ test('should_load_the_default_adapter_even_in_an_unsupported_environment', async
   assert.deepEqual(registrations[0].object.getSupport(), { supported: false, processing: 'unknown' });
 });
 
-test('should_reject_startup_for_an_unknown_adapter', async () => {
+test('should_reject_startup_when_the_configured_adapter_is_unknown', async () => {
   const context = createPrepareContext({ config: { adapter: 'NoSuchAdapter' } });
 
   await assert.rejects(

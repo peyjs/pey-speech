@@ -26,6 +26,27 @@ test('should_load_and_validate_a_known_adapter_when_configured', async () => {
   assert.equal(adapter.isSupported().supported, true);
 });
 
+test('should_map_a_prefixed_but_undeclared_factory_error_to_the_safe_startup_code_when_the_loader_throws_it', async () => {
+  // A factory is configurable third-party code: a prefixed-but-undeclared
+  // code (or a structurally broken error object) never crosses the boundary
+  // as-is — it maps like any other initialization failure.
+  const loaders = {
+    Sneaky: async () => {
+      throw Object.assign(new Error('boom'), { code: 'SPEECH_ADAPTER_HOUSTON_WE_HAVE_A_PROBLEM' });
+    },
+    Unstructured: async () => {
+      // Right code, but missing source/type/timestamp: not standard.
+      throw Object.assign(new Error('half-built'), { code: 'SPEECH_ADAPTER_INVALID' });
+    },
+  };
+  for (const identifier of ['Sneaky', 'Unstructured']) {
+    await assert.rejects(
+      () => loadEnvironmentAdapter(identifier, {}, loaders),
+      (error) => error.code === 'SPEECH_ADAPTER_INITIALIZATION_FAILED' && error.type === 'startup',
+    );
+  }
+});
+
 test('should_reject_startup_with_not_found_when_the_identifier_is_unknown', async () => {
   await assert.rejects(
     () => loadEnvironmentAdapter('NoSuchAdapter', {}, LOADERS),

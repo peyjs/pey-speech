@@ -39,14 +39,35 @@ test('should_report_support_and_processing_when_asked', () => {
   assert.deepEqual(service.getSupport(), { supported: true, processing: 'cloud' });
 });
 
-test('should_report_an_unsupported_environment_without_crashing', async () => {
+test('should_report_an_unsupported_environment_without_crashing_when_the_recognizer_is_absent', async () => {
   const { service } = createService({ adapterOptions: { supported: false, processing: 'unknown' } });
 
   assert.deepEqual(service.getSupport(), { supported: false, processing: 'unknown' });
   await assert.rejects(() => service.listen({}, { onPartial: () => {} }), (error) => error.code === 'SPEECH_UNSUPPORTED');
 });
 
-test('should_report_permission_outcomes_with_their_own_codes', async () => {
+test('should_read_a_truthy_non_boolean_permission_outcome_as_refused_when_the_adapter_answers_loosely', async () => {
+  // The adapter is configurable third-party code: only a real boolean true
+  // counts as granted — 'yes' or 1 is a non-answer and reads as refused,
+  // never as a granted permission the adapter never gave in that shape.
+  const loose = createFakeAdapter();
+  loose.adapter.requestPermission = async () => ({ granted: 'yes' });
+  const looseSession = createServiceWithAdapter(loose.adapter);
+  await assert.rejects(
+    () => looseSession.service.requestPermission(),
+    (error) => error.code === ERROR_CODES.PERMISSION_DENIED,
+  );
+
+  const numeric = createFakeAdapter();
+  numeric.adapter.requestPermission = async () => ({ granted: 1 });
+  const numericSession = createServiceWithAdapter(numeric.adapter);
+  await assert.rejects(
+    () => numericSession.service.requestPermission(),
+    (error) => error.code === ERROR_CODES.PERMISSION_DENIED,
+  );
+});
+
+test('should_report_permission_outcomes_with_their_own_codes_when_granted_or_refused', async () => {
   const granted = createService();
   assert.deepEqual(await granted.service.requestPermission(), { granted: true });
 
@@ -59,7 +80,7 @@ test('should_report_permission_outcomes_with_their_own_codes', async () => {
 
 // --- listening ------------------------------------------------------------
 
-test('should_deliver_partial_and_final_results_and_complete_with_the_text', async () => {
+test('should_deliver_partial_and_final_results_and_complete_with_the_text_when_a_phrase_settles', async () => {
   const partials = [];
   const finals = [];
   const { service, published, session } = createService();
@@ -82,7 +103,7 @@ test('should_deliver_partial_and_final_results_and_complete_with_the_text', asyn
   ]);
 });
 
-test('should_complete_through_stop_with_the_last_final_text', async () => {
+test('should_complete_through_stop_with_the_last_final_text_when_one_was_recognized', async () => {
   const finals = [];
   const { service, session } = createService();
 
@@ -118,7 +139,7 @@ test('should_report_no_speech_when_long_silence_ends_the_session', async () => {
   assert.equal(final.error.code, 'SPEECH_NO_SPEECH');
 });
 
-test('should_map_device_errors_to_their_codes_without_raw_details', async () => {
+test('should_map_device_errors_to_their_codes_without_raw_details_when_the_device_fails', async () => {
   const { service, session } = createService();
 
   const handle = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
@@ -132,7 +153,7 @@ test('should_map_device_errors_to_their_codes_without_raw_details', async () => 
 
 // --- one session at a time ------------------------------------------------
 
-test('should_reject_a_second_session_while_one_is_active_and_free_the_lock_afterwards', async () => {
+test('should_reject_a_second_session_while_one_is_active_and_free_the_lock_afterwards_when_the_first_session_ends', async () => {
   const { service, session } = createService();
 
   const first = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
@@ -153,7 +174,7 @@ test('should_reject_a_second_session_while_one_is_active_and_free_the_lock_after
 
 // --- language -------------------------------------------------------------
 
-test('should_use_the_configured_default_language_and_honor_overrides', async () => {
+test('should_use_the_configured_default_language_and_honor_overrides_when_listen_runs', async () => {
   const { service, calls, session } = createService({ config: { language: 'fa-IR' } });
 
   const first = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
@@ -184,7 +205,7 @@ test('should_cut_the_active_session_without_a_result_when_deactivated', async ()
   await assert.rejects(() => service.listen({}, { onPartial: () => {} }), (error) => error.code === 'SERVICE_UNAVAILABLE');
 });
 
-test('should_never_put_recognized_text_into_events', async () => {
+test('should_never_put_recognized_text_into_events_when_a_session_delivers_results', async () => {
   const { service, published, session } = createService();
 
   const handle = await service.listen({}, { onPartial: () => {}, onFinal: () => {} });
@@ -195,7 +216,7 @@ test('should_never_put_recognized_text_into_events', async () => {
   assert.equal(JSON.stringify(published).includes('متن محرمانه گفتار'), false);
 });
 
-test('should_start_a_new_session_after_a_synchronous_start_failure', async () => {
+test('should_start_a_new_session_after_a_synchronous_start_failure_when_the_device_aborts_inside_start', async () => {
   let attempts = 0;
   const fake = createFakeAdapter();
   const healthyStart = fake.adapter.start.bind(fake);
@@ -257,7 +278,7 @@ test('should_publish_no_events_when_start_throws_without_reporting_an_end', asyn
   assert.equal(types.filter((type) => type === 'speech:listening-stopped').length, 0);
 });
 
-test('should_not_let_a_stale_handle_cancel_a_newer_session', async () => {
+test('should_not_let_a_stale_handle_cancel_a_newer_session_when_sessions_follow_one_another', async () => {
   const fake = createFakeAdapter();
   const { service } = createServiceWithAdapter(fake.adapter);
 
@@ -279,7 +300,7 @@ test('should_not_let_a_stale_handle_cancel_a_newer_session', async () => {
   assert.equal(final.text, 'نتیجه دوم');
 });
 
-test('should_reject_stop_with_the_standard_error_after_deactivation', async () => {
+test('should_reject_stop_with_the_standard_error_when_called_after_deactivation', async () => {
   const fake = createFakeAdapter();
   const { service, deactivate } = createServiceWithAdapter(fake.adapter);
 
@@ -408,7 +429,7 @@ test('should_normalize_an_unusable_support_report_when_the_adapter_returns_garba
   assert.deepEqual(oddSession.service.getSupport(), { supported: true, processing: 'unknown' });
 });
 
-test('should_trim_the_configured_default_language_like_the_per_call_override', async () => {
+test('should_trim_the_configured_default_language_like_the_per_call_override_when_listen_starts', async () => {
   // Both language paths reach the adapter identically: a padded config
   // value is trimmed, not passed through with its whitespace.
   const fake = createFakeAdapter();

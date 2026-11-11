@@ -2,7 +2,7 @@
 
 ## [1.1.0] - 1405-08-19
 
-Round-2 through round-6 review fixes (all unpublished; one release). MINOR because new error paths are declared and the adapter-code contract is now enforced.
+Round-2 through round-7 review fixes (all unpublished; one release). MINOR because new error paths are declared and the adapter-code contract is now enforced.
 
 ### Fixed
 
@@ -10,6 +10,9 @@ Round-2 through round-6 review fixes (all unpublished; one release). MINOR becau
 - `getSupport` shapes the adapter report into exactly the declared `{ supported, processing }`: non-object/non-boolean reports read as unsupported, an undeclared `processing` falls back to `'unknown'`.
 - The configured default language is trimmed like the per-call override.
 - `stop` declares `SPEECH_SERVICE_UNAVAILABLE` in the manifest and the reference (72 real tests — an earlier count of 95 came from the contract suite double-running the service test file).
+- `requestPermission` reads only a real boolean `true` as granted: a truthy non-boolean adapter answer is a non-answer and reads as refused — the same never-raw-adapter-output policy the support report and end codes already follow (test added).
+- The loader passes through only a standard-structured error carrying one of the three declared adapter codes; a prefixed-but-undeclared or structurally broken factory error maps to `SPEECH_ADAPTER_INITIALIZATION_FAILED` like any other failure (test added).
+- All 17 test names missing the `when_` clause moved to the `should_..._when_...` convention (74 tests).
 - A session the device aborts inside `start()` publishes NO events (neither `listening-started` nor `listening-stopped`): "stopped without started" was an invalid sequence for a microphone-state UI, and the two same-window failure shapes now behave identically (tests lock both).
 - The service-level adapter fake moved to `tests/fake-service-adapter.js` — the contract suite used to import the service test file itself, double-running all of its tests on every run (test file imports test file).
 - The reference no longer claims the handle's `stop()` throws `SERVICE_UNAVAILABLE` after deactivation (it is a no-op on a closed session; only service-level methods throw), and `requestPermission` lists all four of its declared codes.

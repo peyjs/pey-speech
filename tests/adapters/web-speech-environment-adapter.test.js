@@ -157,7 +157,7 @@ test('should_map_device_errors_to_the_plugin_codes_when_the_recognizer_fails', (
   }
 });
 
-test('should_treat_the_aborted_error_as_a_deliberate_stop_and_end_through_onend', () => {
+test('should_treat_the_aborted_error_as_a_deliberate_stop_and_end_through_onend_when_the_user_stops_first', () => {
   const fake = installFakeRecognizer();
   try {
     const adapter = createWebSpeechEnvironmentAdapter();
@@ -296,7 +296,7 @@ test('should_grant_permission_and_release_the_tracks_when_media_devices_exist', 
   }
 });
 
-test('should_honor_resultIndex_and_mix_final_and_interim_results_in_one_event', () => {
+test('should_honor_resultIndex_and_mix_final_and_interim_results_in_one_event_when_results_arrive_cumulatively', () => {
   const fake = installFakeRecognizer();
   try {
     const adapter = createWebSpeechEnvironmentAdapter();
@@ -329,7 +329,7 @@ test('should_honor_resultIndex_and_mix_final_and_interim_results_in_one_event', 
   }
 });
 
-test('should_map_an_undefined_error_name_to_the_recognizer_failure_code', () => {
+test('should_map_an_undefined_error_name_to_the_recognizer_failure_code_when_the_device_fails_silently', () => {
   const fake = installFakeRecognizer();
   try {
     const adapter = createWebSpeechEnvironmentAdapter();
