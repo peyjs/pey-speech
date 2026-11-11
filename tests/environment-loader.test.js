@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ADAPTER_ERROR_CODES,
+import { ADAPTER_FACTORY_ERROR_CODES,
   loadEnvironmentAdapter } from '../lib/environment-loader.js';
 
 const LOADERS = {
@@ -55,11 +55,42 @@ test('should_declare_exactly_the_three_pass_through_codes_when_the_adapter_contr
   // these three startup codes keep a standard field-shaped error's identity;
   // everything else maps to INITIALIZATION_FAILED. The triple is locked here
   // so the docs and the loader cannot drift apart.
-  assert.deepEqual(Object.values(ADAPTER_ERROR_CODES).sort(), [
+  assert.deepEqual(Object.values(ADAPTER_FACTORY_ERROR_CODES).sort(), [
     'SPEECH_ADAPTER_INITIALIZATION_FAILED',
     'SPEECH_ADAPTER_INVALID',
     'SPEECH_ADAPTER_NOT_FOUND',
   ]);
+});
+
+test('should_state_all_three_factory_codes_in_the_reference_when_the_doc_side_of_the_contract_is_read', async () => {
+  // Round-11 regression: the round-10 test locked only the CODE side —
+  // editing or deleting the reference's paragraph broke nothing, so the
+  // claimed "doc/code sync" was one-directional. The DOC side is read here
+  // (a deliberate real-file read: the file's content IS the subject):
+  // the Factory errors paragraph must name all three codes and the
+  // everything-else rule.
+  const { readFile } = await import('node:fs/promises');
+  const reference = await readFile(new URL('../docs/reference.md', import.meta.url), 'utf8');
+  const factorySection = reference.slice(reference.indexOf('Factory errors'));
+  assert.ok(factorySection.includes('Factory errors'), 'the Factory errors paragraph exists');
+  for (const code of Object.values(ADAPTER_FACTORY_ERROR_CODES)) {
+    assert.ok(factorySection.includes(code), `the reference names ${code}`);
+  }
+  assert.ok(
+    factorySection.includes('INITIALIZATION_FAILED') && factorySection.includes('ANY other'),
+    'the everything-else-maps-to-INITIALIZATION_FAILED rule is stated',
+  );
+});
+
+test('should_resolve_a_prototype_inherited_identifier_to_not_found_when_the_registry_is_indexed', async () => {
+  // Round-11 regression: plain indexing reads the prototype chain, so a
+  // configured `constructor`/`valueOf` resolved to the INHERITED function
+  // and failed validation as INVALID — the wrong meaning for "no adapter
+  // with this identifier". Registry membership is own-keys only now.
+  for (const identifier of ['constructor', 'valueOf', 'hasOwnProperty']) {
+    const error = await loadEnvironmentAdapter(identifier, {}, LOADERS).catch((caught) => caught);
+    assert.equal(error?.code, 'SPEECH_ADAPTER_NOT_FOUND', identifier);
+  }
 });
 
 test('should_load_and_validate_a_known_adapter_when_configured', async () => {
