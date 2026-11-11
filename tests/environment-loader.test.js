@@ -3,7 +3,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEnvironmentAdapter } from '../lib/environment-loader.js';
+import { ADAPTER_ERROR_CODES,
+  loadEnvironmentAdapter } from '../lib/environment-loader.js';
 
 const LOADERS = {
   Good: async () => ({
@@ -48,6 +49,18 @@ const LOADERS = {
     throw error;
   },
 };
+
+test('should_declare_exactly_the_three_pass_through_codes_when_the_adapter_contract_is_locked', () => {
+  // The documented pass-through contract (reference, Environment adapter):
+  // these three startup codes keep a standard field-shaped error's identity;
+  // everything else maps to INITIALIZATION_FAILED. The triple is locked here
+  // so the docs and the loader cannot drift apart.
+  assert.deepEqual(Object.values(ADAPTER_ERROR_CODES).sort(), [
+    'SPEECH_ADAPTER_INITIALIZATION_FAILED',
+    'SPEECH_ADAPTER_INVALID',
+    'SPEECH_ADAPTER_NOT_FOUND',
+  ]);
+});
 
 test('should_load_and_validate_a_known_adapter_when_configured', async () => {
   const adapter = await loadEnvironmentAdapter('Good', {}, LOADERS);
