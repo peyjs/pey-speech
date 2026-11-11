@@ -2,8 +2,18 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSpeechError } from '../lib/error.js';
+import { createSpeechError, ERROR_TYPES } from '../lib/error.js';
 import { ERROR_CODES } from '../lib/constants.js';
+
+test('should_stay_frozen_when_an_importer_tries_to_widen_the_type_list', () => {
+  // The loader's pass-through gate validates a third-party error's type
+  // against this list: a mutable guard collection would let any importer
+  // neuter the gate with one call. (A frozen Set still grows through
+  // `.add` — hence a frozen array.)
+  assert.throws(() => ERROR_TYPES.push('banana'));
+  assert.throws(() => ERROR_TYPES[0] = 'banana');
+  assert.deepEqual([...ERROR_TYPES].sort(), ['critical', 'operational', 'startup']);
+});
 
 test('should_build_standard_structured_error_when_called_with_code_and_message', () => {
   const error = createSpeechError(ERROR_CODES.NO_SPEECH, 'No speech was heard');

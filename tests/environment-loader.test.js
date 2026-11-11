@@ -26,6 +26,19 @@ const LOADERS = {
     error.timestamp = '2026-11-11T10:00:00.000Z';
     throw error;
   },
+  PlainStructured: async () => {
+    // A standard field-shaped error that is NOT an Error instance — exactly
+    // what this plugin's own createSpeechError (and any standard Bonyan
+    // factory) produces. The pass-through gate is field-shaped, so this
+    // must cross with its identity intact.
+    throw {
+      code: 'SPEECH_ADAPTER_INVALID',
+      message: 'plain structured rejection',
+      source: 'vendor.adapter',
+      type: 'operational',
+      timestamp: '2026-11-11T10:00:00.000Z',
+    };
+  },
   BrokenType: async () => {
     const error = new Error('structured-looking but non-standard type');
     error.code = 'SPEECH_ADAPTER_INVALID';
@@ -91,7 +104,7 @@ test('should_keep_a_coded_adapter_failure_when_the_factory_throws_one', async ()
   );
 });
 
-test('should_pass_a_fully_structured_adapter_failure_through_with_its_identity_intact', async () => {
+test('should_pass_a_fully_structured_adapter_failure_through_with_its_identity_intact_when_the_factory_throws_one', async () => {
   // The pass-through branch must be distinguishable from the mapping one:
   // the error arrives as a real Error with a declared code AND valid
   // standard field values, and keeps its own source/timestamp identity.
@@ -102,6 +115,21 @@ test('should_pass_a_fully_structured_adapter_failure_through_with_its_identity_i
       && error.code === 'SPEECH_ADAPTER_INVALID'
       && error.source === 'vendor.adapter'
       && error.type === 'operational'
+      && error.timestamp === '2026-11-11T10:00:00.000Z',
+  );
+});
+
+test('should_pass_a_standard_plain_object_error_through_when_its_fields_are_fully_valid', async () => {
+  // The Bonyan error structure is FIELD-shaped (bonyan/error.md): nothing
+  // in it requires an Error instance, and this plugin's own factory returns
+  // plain objects. instanceof Error was a stricter gate than the standard —
+  // a third-party factory reusing createSpeechError used to lose its
+  // declared code to the mapping branch.
+  await assert.rejects(
+    () => loadEnvironmentAdapter('PlainStructured', {}, LOADERS),
+    (error) => error.code === 'SPEECH_ADAPTER_INVALID'
+      && error.message === 'plain structured rejection'
+      && error.source === 'vendor.adapter'
       && error.timestamp === '2026-11-11T10:00:00.000Z',
   );
 });
