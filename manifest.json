@@ -53,7 +53,9 @@
             "SPEECH_UNSUPPORTED",
             "SPEECH_SESSION_ACTIVE",
             "SERVICE_UNAVAILABLE",
-            "SPEECH_SERVICE_UNAVAILABLE"
+            "SPEECH_SERVICE_UNAVAILABLE",
+            "SPEECH_PERMISSION_DENIED",
+            "SPEECH_NO_SPEECH"
           ]
         },
         {

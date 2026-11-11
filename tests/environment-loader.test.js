@@ -18,6 +18,22 @@ const LOADERS = {
   CodedFailure: async () => {
     throw Object.assign(new Error('already coded'), { code: 'SPEECH_ADAPTER_INITIALIZATION_FAILED' });
   },
+  FullyStructured: async () => {
+    const error = new Error('adapter rejected its configuration');
+    error.code = 'SPEECH_ADAPTER_INVALID';
+    error.source = 'vendor.adapter';
+    error.type = 'operational';
+    error.timestamp = '2026-11-11T10:00:00.000Z';
+    throw error;
+  },
+  BrokenType: async () => {
+    const error = new Error('structured-looking but non-standard type');
+    error.code = 'SPEECH_ADAPTER_INVALID';
+    error.source = 'vendor.adapter';
+    error.type = 'banana';
+    error.timestamp = '2026-11-11T10:00:00.000Z';
+    throw error;
+  },
 };
 
 test('should_load_and_validate_a_known_adapter_when_configured', async () => {
@@ -72,6 +88,31 @@ test('should_keep_a_coded_adapter_failure_when_the_factory_throws_one', async ()
   await assert.rejects(
     () => loadEnvironmentAdapter('CodedFailure', {}, LOADERS),
     (error) => error.code === 'SPEECH_ADAPTER_INITIALIZATION_FAILED',
+  );
+});
+
+test('should_pass_a_fully_structured_adapter_failure_through_with_its_identity_intact', async () => {
+  // The pass-through branch must be distinguishable from the mapping one:
+  // the error arrives as a real Error with a declared code AND valid
+  // standard field values, and keeps its own source/timestamp identity.
+  await assert.rejects(
+    () => loadEnvironmentAdapter('FullyStructured', {}, LOADERS),
+    (error) => error instanceof Error
+      && error.message === 'adapter rejected its configuration'
+      && error.code === 'SPEECH_ADAPTER_INVALID'
+      && error.source === 'vendor.adapter'
+      && error.type === 'operational'
+      && error.timestamp === '2026-11-11T10:00:00.000Z',
+  );
+});
+
+test('should_map_a_structured_looking_failure_when_its_type_is_not_a_standard_value', async () => {
+  // Field PRESENCE is not validity: a `type` outside the three standard
+  // Bonyan values (same for an unparseable timestamp or a non-Error) maps
+  // like any other broken failure instead of crossing the boundary.
+  await assert.rejects(
+    () => loadEnvironmentAdapter('BrokenType', {}, LOADERS),
+    (error) => error.code === 'SPEECH_ADAPTER_INITIALIZATION_FAILED' && error.type === 'startup',
   );
 });
 
