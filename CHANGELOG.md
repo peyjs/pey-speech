@@ -2,7 +2,7 @@
 
 ## [1.1.0] - 1405-08-19
 
-Round-2 through round-11 review fixes (all unpublished; one release). MINOR because new error paths are declared and the adapter-code contract is now enforced.
+Round-2 through round-12 review fixes (all unpublished; one release). MINOR because new error paths are declared and the adapter-code contract is now enforced. (Round 12 was comment-only hygiene: the loader's rationale comment now names the service constant by its real name, and the process-reference cleanup in `lib/` comments; the round-13 pass completed the record — the `@throws` JSDoc of `requestPermission` and `stop` lists the `SPEECH_SERVICE_UNAVAILABLE` they actually throw, matching the manifest and the reference.)
 
 ### Fixed
 
