@@ -1054,3 +1054,90 @@ describe('capacitor adapter — re-open scheduling', () => {
     }
   });
 });
+
+describe('capacitor adapter — late settle of an abandoned start', () => {
+  // The window between the watchdog firing and the next dispatch: the
+  // zombie's dispatch id is still current there, so an unfiltered settle
+  // would reset the failure count (resolve → endless abandon/resolve loop,
+  // no end report ever) or count the same start twice (reject → the cap
+  // ends the session one start early).
+  it('should_not_reset_the_failure_count_when_an_abandoned_start_resolves_late', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      // A slow-but-honest bridge: the start settles after the guard's
+      // deadline, before the next dispatch.
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({}), 55);
+      });
+    };
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        startTimeoutMs: 50, restartDelayMs: 40, maxFailureRestarts: 3,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      for (let cycle = 0; cycle < 10 && reports.length === 0; cycle += 1) {
+        t.mock.timers.tick(50); // the guard abandons the wedged start
+        await flush(); await flush();
+        t.mock.timers.tick(5); // the zombie resolves late
+        await flush(); await flush();
+        t.mock.timers.tick(35); // the scheduled attempt dispatches
+        await flush(); await flush();
+      }
+      assert.equal(reports.length, 1, 'the slow bridge reaches the standard end report');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+      assert.equal(bridge.startCalls.length, 4, 'the failure count survived every late resolve');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+
+  it('should_not_count_an_abandoned_start_twice_when_it_rejects_late', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise((resolve, reject) => {
+        setTimeout(() => reject(new Error('Client side error')), 55);
+      });
+    };
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        startTimeoutMs: 50, restartDelayMs: 40, maxFailureRestarts: 1,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      for (let cycle = 0; cycle < 10 && reports.length === 0; cycle += 1) {
+        t.mock.timers.tick(50);
+        await flush(); await flush();
+        t.mock.timers.tick(5);
+        await flush(); await flush();
+        t.mock.timers.tick(35);
+        await flush(); await flush();
+      }
+      assert.equal(reports.length, 1, 'the session ends through the configured cap');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+      assert.equal(bridge.startCalls.length, 2, 'the watchdog count is not doubled by the late reject');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+});

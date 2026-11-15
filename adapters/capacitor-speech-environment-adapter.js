@@ -375,11 +375,15 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
               return;
             }
             // The zombie start is abandoned: stop tracking it, count the
-            // failure, and let the re-open chain continue. Its late settle
-            // is ignored by the dispatchId checks, and the pre-start
-            // isListening cleanup deals with a recognizer it may have left
-            // listening.
+            // failure, and let the re-open chain continue. Abandonment also
+            // invalidates the zombie's dispatch identity — otherwise a late
+            // settle landing BEFORE the next dispatch (the zombie's id is
+            // still current there) would resolve the failure count away and
+            // loop forever, or count the same start twice on reject. The
+            // pre-start isListening cleanup deals with a recognizer the
+            // zombie may have left listening.
             startPending = false;
+            startDispatchId += 1;
             console.warn('[pey.speech] native start never settled — abandoning it');
             consecutiveFailures += 1;
             scheduleAttempt(restartDelayMs);
@@ -416,9 +420,10 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
             // superseded while it was pending belongs to a newer schedule
             // that skipped its own dispatch (startPending) — this failure
             // is the only remaining path that keeps the re-open chain
-            // alive. (The dispatchId check above only filters a zombie's
-            // late settle, which happens after a newer DISPATCH — a
-            // different situation.)
+            // alive. (The dispatchId check above filters a zombie's late
+            // settle in both windows: after a newer dispatch, and between
+            // the watchdog firing and the next dispatch — the abandonment
+            // invalidates the zombie's identity.)
             // Some devices reject start() with ordinary silence instead of
             // an error event — same treatment: a quiet segment end, no
             // failure counting.
