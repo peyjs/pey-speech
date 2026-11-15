@@ -2,7 +2,7 @@
   "name": "pey.speech",
   "version": "1.2.0",
   "type": "module",
-  "description": "Device speech recognition as a platform capability behind a swappable environment adapter (Web Speech API today): support check, permission, listening sessions with partial and final results",
+  "description": "Device speech recognition as a platform capability behind a swappable environment adapter (the Web Speech API in a plain browser, the device recognizer on Android through the Capacitor bridge; the shipped default adapter picks per environment): support check, permission, listening sessions with partial and final results",
   "exports": {
     ".": "./index.js",
     "./manifest.json": "./manifest.json",

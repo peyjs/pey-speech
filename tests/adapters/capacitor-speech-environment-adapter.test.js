@@ -894,4 +894,52 @@ describe('capacitor adapter — re-open scheduling', () => {
       restore();
     }
   });
+
+  it('should_abandon_a_never_settling_start_and_keep_the_chain_alive', async (t) => {
+    // Mocked clock: the start guard is asserted against the clock, not
+    // against a real sleep.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise(() => {}); // never settles — a wedged bridge
+    };
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        restartDelayMs: 0, readyWaitMs: 0, startTimeoutMs: 50, maxFailureRestarts: 1,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 1, 'the wedged start is dispatched');
+      assert.deepEqual(reports, [], 'no premature end while the guard waits');
+
+      // The time guard fires: the zombie start is abandoned, counted as a
+      // failure, and the next attempt dispatches a fresh start.
+      t.mock.timers.tick(50);
+      await flush(); await flush();
+      t.mock.timers.tick(0);
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 2, 'the chain continues past the zombie');
+
+      // The second start wedges too: the streak cap ends the session —
+      // a wedged bridge cannot hang `done` forever.
+      t.mock.timers.tick(50);
+      await flush(); await flush();
+      t.mock.timers.tick(0);
+      await flush(); await flush();
+      assert.equal(reports.length, 1, 'the streak cap ends the session');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
 });

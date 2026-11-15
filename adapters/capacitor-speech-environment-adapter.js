@@ -23,8 +23,9 @@
 // accumulated text flowing through onPartial/onFinal, and only the caller's
 // stop (or a hard failure streak) ends the logical session. Re-opens are
 // token-scheduled and the native start dispatch is serialized — a newer
-// schedule supersedes an older one, and at most one native start is ever in
-// flight.
+// schedule supersedes an older one, and at most one native start is ever
+// tracked in flight (a start that never settles is abandoned by the
+// startTimeoutMs time guard instead of wedging the session).
 //
 // SIZE NOTE: this file deliberately stays in one piece despite the 200-line
 // guideline: it is a single multi-segment state machine over a dozen closure
@@ -59,6 +60,10 @@ const DEFAULT_RESTART_DELAY_MS = 250;
 const DEFAULT_MAX_FAILURE_RESTARTS = 3;
 const DEFAULT_ALLOW_FOR_SILENCE_MS = 1500;
 const DEFAULT_READY_WAIT_MS = 1500;
+// Guard for a native start() that never settles: without it, a wedged
+// bridge would hold startPending forever and the logical session would
+// hang silently — no end report, no re-open, nothing.
+const DEFAULT_START_TIMEOUT_MS = 5000;
 // Wait after stopping a busy recognizer before re-opening: the native layer
 // tears down asynchronously — an immediate start lands on a dying recognizer
 // and fails instantly (the re-entry "Didn't understand" storm).
@@ -123,8 +128,10 @@ function textFromPartial(data) {
  *   native error events with no text in between — tolerated before
  *   surfacing an error, default 3), allowForSilenceMs (Android silence
  *   window per segment, default 1500), readyWaitMs (fallback wait before
- *   re-opening when the readiness signal never fires, default 1500) and
- *   segmentSettleMs (wait after stopping a busy recognizer, default 250).
+ *   re-opening when the readiness signal never fires, default 1500),
+ *   segmentSettleMs (wait after stopping a busy recognizer, default 250)
+ *   and startTimeoutMs (time guard: a native start that never settles is
+ *   abandoned and counted as a failure, default 5000).
  * @returns {object} Environment adapter over the internal contract.
  */
 export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
@@ -148,6 +155,10 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
     && adapterConfig.segmentSettleMs >= 0
     ? adapterConfig.segmentSettleMs
     : DEFAULT_SEGMENT_SETTLE_MS;
+  const startTimeoutMs = typeof adapterConfig.startTimeoutMs === 'number'
+    && adapterConfig.startTimeoutMs > 0
+    ? adapterConfig.startTimeoutMs
+    : DEFAULT_START_TIMEOUT_MS;
 
   // The adapter knows its own active session so the service can stop it
   // without holding the per-session control.
@@ -233,8 +244,15 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
       // await — so a re-open scheduled while a start is still pending skips
       // its own dispatch (the pending start either opens the segment, or
       // its failure handler schedules the next attempt). At most one native
-      // start is ever in flight.
+      // start is ever tracked in flight; a start that never settles is
+      // abandoned by the startTimeoutMs guard below instead of wedging the
+      // session.
       let startPending = false;
+      // Identity of the current dispatch: a start that was abandoned by the
+      // time guard and settles late (resolve or reject) must not touch the
+      // state of the newer dispatch that replaced it.
+      let startDispatchId = 0;
+      let startGuardTimer = null;
       let restartTimer = null;
       let lastKnownText = null;
       const handles = [];
@@ -243,6 +261,17 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         if (restartTimer !== null) {
           clearTimeout(restartTimer);
           restartTimer = null;
+        }
+        if (startGuardTimer !== null) {
+          clearTimeout(startGuardTimer);
+          startGuardTimer = null;
+        }
+      };
+
+      const clearStartGuard = () => {
+        if (startGuardTimer !== null) {
+          clearTimeout(startGuardTimer);
+          startGuardTimer = null;
         }
       };
 
@@ -328,8 +357,29 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         // The dispatch is fully guarded: a bridge whose start() throws
         // synchronously (or returns a non-thenable) flows into the same
         // failure mapping as a rejected promise — no unhandled rejection,
-        // and the session always keeps its end report.
+        // and the session always keeps its end report. A start that never
+        // settles is abandoned by the time guard instead of wedging the
+        // session behind startPending forever.
         startPending = true;
+        const dispatchId = ++startDispatchId;
+        clearStartGuard();
+        startGuardTimer = startTimeoutMs > 0
+          ? setTimeout(() => {
+            startGuardTimer = null;
+            if (dispatchId !== startDispatchId || ended || callerStopped || !startPending) {
+              return;
+            }
+            // The zombie start is abandoned: stop tracking it, count the
+            // failure, and let the re-open chain continue. Its late settle
+            // is ignored by the dispatchId checks, and the pre-start
+            // isListening cleanup deals with a recognizer it may have left
+            // listening.
+            startPending = false;
+            console.warn('[pey.speech] native start never settled — abandoning it');
+            consecutiveFailures += 1;
+            scheduleAttempt(restartDelayMs);
+          }, startTimeoutMs)
+          : null;
         Promise.resolve()
           .then(() => bridge.start({
             language,
@@ -339,10 +389,20 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
             allowForSilence: allowForSilenceMs,
           }))
           .then(() => {
+            if (dispatchId !== startDispatchId) {
+              // A zombie's late settle — the newer dispatch owns the state.
+              return;
+            }
+            clearStartGuard();
             startPending = false;
             consecutiveFailures = 0;
           })
           .catch((error) => {
+            if (dispatchId !== startDispatchId) {
+              // Same: the abandoned start's late rejection is ignored.
+              return;
+            }
+            clearStartGuard();
             startPending = false;
             if (ended || callerStopped) {
               return;
@@ -351,7 +411,9 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
             // superseded while it was pending belongs to a newer schedule
             // that skipped its own dispatch (startPending) — this failure
             // is the only remaining path that keeps the re-open chain
-            // alive.
+            // alive. (The dispatchId check above only filters a zombie's
+            // late settle, which happens after a newer DISPATCH — a
+            // different situation.)
             // Some devices reject start() with ordinary silence instead of
             // an error event — same treatment: a quiet segment end, no
             // failure counting.

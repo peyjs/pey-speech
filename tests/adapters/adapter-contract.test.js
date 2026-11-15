@@ -73,11 +73,49 @@ export function runAdapterContractSuite(kind, factory) {
 
 runAdapterContractSuite('web-speech', () => createWebSpeechEnvironmentAdapter());
 // The Capacitor adapter loads in a plain Node run without a bridge (it
-// reports "unsupported" and its start ends synchronously) — the same
-// fail-open contract, exercised here like every other implementation.
+// reports "unsupported" and its start ends synchronously) — the fail-open
+// contract, exercised here like every other implementation.
 runAdapterContractSuite('capacitor', () => createCapacitorSpeechEnvironmentAdapter());
+// The same five contract claims on the BRIDGED path: without this run the
+// suite would only ever exercise the early "unsupported" returns and miss
+// a real contract violation on the live Android path. A fake bridge stands
+// in for the native plugin; it is installed after the no-bridge suite and
+// stays for the rest of this file's own test process.
+runAdapterContractSuite('capacitor-bridge', () => {
+  globalThis.Capacitor = { Plugins: { SpeechRecognition: createBridgeFake() } };
+  return createCapacitorSpeechEnvironmentAdapter();
+});
 runAdapterContractSuite('fake', () => createContractAdapter());
 
 // The service-level fake is a third full implementation of the contract:
 // it must satisfy the same suite the real adapter passes.
 runAdapterContractSuite('service-fake', () => createFakeAdapter().adapter);
+
+/**
+ * Minimal in-memory stand-in for the window.Capacitor SpeechRecognition
+ * bridge (only the surface the bridged contract suite touches).
+ * @returns {object} Fake bridge.
+ */
+function createBridgeFake() {
+  return {
+    listeners: {},
+    addListener(eventName, handler) {
+      this.listeners[eventName] = this.listeners[eventName] ?? [];
+      this.listeners[eventName].push(handler);
+      return { remove: () => {} };
+    },
+    async start() {
+      return {};
+    },
+    async stop() {},
+    async isListening() {
+      return { listening: false };
+    },
+    async checkPermissions() {
+      return { speechRecognition: 'granted' };
+    },
+    async requestPermissions() {
+      return { speechRecognition: 'granted' };
+    },
+  };
+}

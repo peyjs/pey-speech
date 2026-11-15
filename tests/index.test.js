@@ -70,6 +70,13 @@ test('should_match_manifest_contract_when_loaded', async () => {
   assert.deepEqual(methodNames, ['getSupport', 'requestPermission', 'listen', 'stop']);
   assert.deepEqual(manifest.events.map((event) => event.name), ['speech:listening-started', 'speech:listening-stopped']);
   assert.deepEqual(manifest.config, { adapter: 'AutoSpeechEnvironmentAdapter', adapterConfig: {}, language: 'fa-IR' });
+  // The manifest is the consumer-facing contract: its description must name
+  // the Android path, not the retired "Web Speech API today" claim (the
+  // same string lives in package.json — both are locked here).
+  for (const description of [manifest.description, pkg.description]) {
+    assert.match(description, /Capacitor/);
+    assert.doesNotMatch(description, /Web Speech API today/);
+  }
 });
 
 test('should_fall_back_to_the_manifest_default_adapter_when_the_config_omits_it', async () => {
