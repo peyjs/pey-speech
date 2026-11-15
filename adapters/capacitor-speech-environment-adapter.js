@@ -257,14 +257,18 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
       let lastKnownText = null;
       const handles = [];
 
+      // Clears only the re-open scheduling. The start guard of a PENDING
+      // start must survive this: a bridge event that schedules a re-open
+      // during the pending window must not disarm the watchdog that would
+      // rescue a wedged start — the scheduled attempt hits the startPending
+      // guard and returns, and with the guard gone too, nothing would ever
+      // move again. The guard is cleared only at its legitimate points: the
+      // dispatch's own settle, the zombie abandonment inside the guard
+      // itself, and finish().
       const clearTimers = () => {
         if (restartTimer !== null) {
           clearTimeout(restartTimer);
           restartTimer = null;
-        }
-        if (startGuardTimer !== null) {
-          clearTimeout(startGuardTimer);
-          startGuardTimer = null;
         }
       };
 
@@ -292,6 +296,7 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         ended = true;
         activeStop = null;
         clearTimers();
+        clearStartGuard();
         removeListeners();
         end(report);
       };

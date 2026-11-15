@@ -942,4 +942,115 @@ describe('capacitor adapter — re-open scheduling', () => {
       restore();
     }
   });
+
+  it('should_keep_the_start_guard_armed_when_a_bridge_event_schedules_a_reopen', async (t) => {
+    // Round-25 regression: scheduleAttempt() used to clear the START GUARD
+    // too, so any bridge event arriving while a start was pending disarmed
+    // the very watchdog that rescues a wedged start — and the scheduled
+    // attempt only hit the startPending guard: frozen session, no end
+    // report, nothing.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise(() => {}); // never settles — a wedged bridge
+    };
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        restartDelayMs: 0, readyWaitMs: 0, startTimeoutMs: 50, maxFailureRestarts: 3,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 1, 'the wedged start is dispatched');
+
+      // A bridge event arrives DURING the pending window: it schedules a
+      // re-open but must NOT disarm the pending start's guard.
+      bridge.emit('readyForNextSession', {});
+      await flush(); await flush();
+
+      t.mock.timers.tick(50);
+      await flush(); await flush();
+      t.mock.timers.tick(0);
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 2, 'the guard fired past the event — the chain moved');
+
+      // The chain keeps cycling to the streak cap: no silent hang.
+      for (let round = 0; round < 10 && reports.length === 0; round += 1) {
+        t.mock.timers.tick(50);
+        await flush(); await flush();
+        t.mock.timers.tick(0);
+        await flush(); await flush();
+      }
+      assert.equal(reports.length, 1, 'the wedged bridge reaches the standard end report');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+
+  it('should_ignore_a_zombie_starts_late_settle_after_abandonment', async (t) => {
+    // Round-25 regression: without the dispatchId check, a zombie start's
+    // LATE resolve cleared the newer dispatch's guard (the same silent hang
+    // returns), flipped startPending while the newer start was in the air,
+    // and reset the failure count.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    const settles = [];
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise((resolve, reject) => {
+        settles.push({ resolve, reject });
+      });
+    };
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        restartDelayMs: 0, readyWaitMs: 0, startTimeoutMs: 50, maxFailureRestarts: 1,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 1);
+
+      // The first start wedges; the guard abandons it; the second start
+      // dispatches (its own guard armed).
+      t.mock.timers.tick(50);
+      await flush(); await flush();
+      t.mock.timers.tick(0);
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 2, 'the second start is in the air');
+
+      // The zombie's promise resolves LATE: it must change nothing — the
+      // second dispatch's guard still fires and the streak cap still ends
+      // the session with the counted failures.
+      settles[0].resolve({});
+      await flush(); await flush();
+
+      t.mock.timers.tick(50);
+      await flush(); await flush();
+      t.mock.timers.tick(0);
+      await flush(); await flush();
+      assert.equal(bridge.startCalls.length, 2, 'no third dispatch — the second was still tracked');
+      assert.equal(reports.length, 1, 'the failure count survived the late settle');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
 });

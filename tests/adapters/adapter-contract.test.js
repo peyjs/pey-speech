@@ -39,7 +39,7 @@ export function runAdapterContractSuite(kind, factory) {
     assert.equal(typeof outcome.granted, 'boolean');
   });
 
-  test(`[${kind}] should_return_a_session_control_with_stop_when_started`, () => {
+  test(`[${kind}] should_return_a_session_control_with_stop_when_started`, async () => {
     const adapter = factory();
     let ended = false;
     const control = adapter.start({
@@ -52,13 +52,17 @@ export function runAdapterContractSuite(kind, factory) {
     });
 
     assert.equal(typeof control.stop, 'function');
+    // Let an async dispatch (the Capacitor adapter dispatches after its
+    // first await) land, so the stop really stops an OPEN session and not
+    // an early return.
+    await new Promise((resolve) => setImmediate(resolve));
     // A stop must end the session exactly once, without throwing.
     control.stop({ flush: false });
     assert.equal(ended, true);
     control.stop({ flush: false });
   });
 
-  test(`[${kind}] should_stop_safely_through_the_adapter_level_stop_when_called`, () => {
+  test(`[${kind}] should_stop_safely_through_the_adapter_level_stop_when_called`, async () => {
     const adapter = factory();
     adapter.start({
       language: 'fa-IR',
@@ -67,6 +71,7 @@ export function runAdapterContractSuite(kind, factory) {
       end: () => {},
     });
 
+    await new Promise((resolve) => setImmediate(resolve));
     assert.doesNotThrow(() => adapter.stop({ flush: false }));
   });
 }
@@ -91,23 +96,49 @@ runAdapterContractSuite('fake', () => createContractAdapter());
 // it must satisfy the same suite the real adapter passes.
 runAdapterContractSuite('service-fake', () => createFakeAdapter().adapter);
 
+// Round-25 regression: the bridged suite used to stop synchronously right
+// after start — before the Capacitor adapter's async dispatch ever landed —
+// so bridge.start was called ZERO times and the live start→stop cycle went
+// unclaimed. This locks the dispatch explicitly.
+test('[capacitor-bridge] should_dispatch_the_native_start_and_stop_when_a_session_cycles', async () => {
+  const bridge = createBridgeFake();
+  globalThis.Capacitor = { Plugins: { SpeechRecognition: bridge } };
+  const adapter = createCapacitorSpeechEnvironmentAdapter();
+  const control = adapter.start({
+    language: 'fa-IR',
+    onPartial: () => {},
+    onFinal: () => {},
+    end: () => {},
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(bridge.startCalls.length, 1, 'the native start was really dispatched');
+  control.stop({ flush: false });
+  assert.equal(bridge.stopCalls, 1, 'the native session was really stopped');
+});
+
 /**
  * Minimal in-memory stand-in for the window.Capacitor SpeechRecognition
  * bridge (only the surface the bridged contract suite touches).
  * @returns {object} Fake bridge.
  */
 function createBridgeFake() {
-  return {
+  const fake = {
     listeners: {},
+    startCalls: [],
+    stopCalls: 0,
     addListener(eventName, handler) {
       this.listeners[eventName] = this.listeners[eventName] ?? [];
       this.listeners[eventName].push(handler);
       return { remove: () => {} };
     },
     async start() {
+      fake.startCalls.push(null);
       return {};
     },
-    async stop() {},
+    async stop() {
+      fake.stopCalls += 1;
+    },
     async isListening() {
       return { listening: false };
     },
@@ -118,4 +149,5 @@ function createBridgeFake() {
       return { speechRecognition: 'granted' };
     },
   };
+  return fake;
 }
