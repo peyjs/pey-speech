@@ -22,24 +22,37 @@
 // re-opens the next segment when the bridge signals readiness, keeps the
 // accumulated text flowing through onPartial/onFinal, and only the caller's
 // stop (or a hard failure streak) ends the logical session. Re-opens are
-// token-scheduled — a newer schedule supersedes an older one, so no path can
-// open two native segments at once.
+// token-scheduled and the native start dispatch is serialized — a newer
+// schedule supersedes an older one, and at most one native start is ever in
+// flight.
+//
+// SIZE NOTE: this file deliberately stays in one piece despite the 200-line
+// guideline: it is a single multi-segment state machine over a dozen closure
+// bindings. The parts that extract cleanly (error classification, payload
+// text extraction) are already standalone pure functions below; cutting the
+// state machine out would trade real cohesion for an artificial parameter
+// object.
 
 // A permission failure is terminal — but only a genuine denial wording
 // counts: "failed to query permission state" mentions permission too and
-// must not end the session as a denial.
+// must not end the session as a denial. Android's standard
+// ERROR_INSUFFICIENT_PERMISSIONS ("Insufficient permissions") carries no
+// denial verb, hence `insufficient`.
 const PERMISSION_HINT_PATTERN = /permission/;
-const PERMISSION_DENIED_PATTERN = /denied|required|missing|not granted|rejected/;
+const PERMISSION_DENIED_PATTERN = /denied|required|missing|not granted|rejected|insufficient/;
 
 // Android's recognizer reports ordinary silence as an error event with
-// device-specific wording (ERROR_NO_MATCH / ERROR_SPEECH_TIMEOUT): "No
-// match", "Didn't understand, please try again.". These are segment ENDS,
-// not failures — the logical session just re-opens.
+// device-specific wording. Each marker's source wording:
+//   'no match'          → ERROR_NO_MATCH ("No match")
+//   "didn't understand" → ERROR_SPEECH_TIMEOUT ("Didn't understand, please
+//                         try again.")
+//   'no speech'         → recognizer variants ("no speech")
+// These are segment ENDS, not failures — the logical session just re-opens.
+// Nothing that names a real failure (permission, service) may live here.
 const NO_SPEECH_ERROR_MARKERS = Object.freeze([
   'no match',
   "didn't understand",
   'no speech',
-  'insufficient',
 ]);
 
 const DEFAULT_RESTART_DELAY_MS = 250;
@@ -213,9 +226,15 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
       // that keeps recognizing is not failing.
       let consecutiveErrorEvents = 0;
       // Monotonic token for scheduled re-opens: a newer schedule supersedes
-      // an older one, and a superseded attempt aborts at its next await —
-      // no path can land two native starts in the air at once.
+      // an older one, and a superseded attempt aborts at its next await.
       let restartToken = 0;
+      // Serialization of the native start dispatch: an attempt dispatches
+      // only while this is false and flips it synchronously, before any
+      // await — so a re-open scheduled while a start is still pending skips
+      // its own dispatch (the pending start either opens the segment, or
+      // its failure handler schedules the next attempt). At most one native
+      // start is ever in flight.
+      let startPending = false;
       let restartTimer = null;
       let lastKnownText = null;
       const handles = [];
@@ -303,13 +322,14 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         } catch {
           // Nothing to clean up — the start attempt reports its own error.
         }
-        if (ended || callerStopped || token !== restartToken) {
+        if (ended || callerStopped || token !== restartToken || startPending) {
           return;
         }
         // The dispatch is fully guarded: a bridge whose start() throws
         // synchronously (or returns a non-thenable) flows into the same
         // failure mapping as a rejected promise — no unhandled rejection,
         // and the session always keeps its end report.
+        startPending = true;
         Promise.resolve()
           .then(() => bridge.start({
             language,
@@ -319,12 +339,19 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
             allowForSilence: allowForSilenceMs,
           }))
           .then(() => {
+            startPending = false;
             consecutiveFailures = 0;
           })
           .catch((error) => {
-            if (ended || callerStopped || token !== restartToken) {
+            startPending = false;
+            if (ended || callerStopped) {
               return;
             }
+            // No token check here on purpose: a start whose token was
+            // superseded while it was pending belongs to a newer schedule
+            // that skipped its own dispatch (startPending) — this failure
+            // is the only remaining path that keeps the re-open chain
+            // alive.
             // Some devices reject start() with ordinary silence instead of
             // an error event — same treatment: a quiet segment end, no
             // failure counting.

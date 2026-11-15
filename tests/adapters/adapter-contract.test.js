@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebSpeechEnvironmentAdapter } from '../../adapters/web-speech-environment-adapter.js';
+import { createCapacitorSpeechEnvironmentAdapter } from '../../adapters/capacitor-speech-environment-adapter.js';
 import { createFakeAdapter } from '../fake-service-adapter.js';
 import { createContractAdapter } from '../fake-contract-adapter.js';
 
@@ -71,6 +72,10 @@ export function runAdapterContractSuite(kind, factory) {
 }
 
 runAdapterContractSuite('web-speech', () => createWebSpeechEnvironmentAdapter());
+// The Capacitor adapter loads in a plain Node run without a bridge (it
+// reports "unsupported" and its start ends synchronously) — the same
+// fail-open contract, exercised here like every other implementation.
+runAdapterContractSuite('capacitor', () => createCapacitorSpeechEnvironmentAdapter());
 runAdapterContractSuite('fake', () => createContractAdapter());
 
 // The service-level fake is a third full implementation of the contract:

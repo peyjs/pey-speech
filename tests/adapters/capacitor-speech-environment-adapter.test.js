@@ -507,6 +507,33 @@ describe('capacitor adapter — failure mapping', () => {
     }
   });
 
+  it('should_end_immediately_when_the_error_event_reports_insufficient_permissions', async () => {
+    // Android's standard ERROR_INSUFFICIENT_PERMISSIONS carries no denial
+    // verb — it must land in the permission family, never in the silence
+    // family (an endless quiet re-open loop with the mic already revoked).
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await tick();
+      bridge.emit('error', { code: 'ERROR_INSUFFICIENT_PERMISSIONS', message: 'Insufficient permissions' });
+      await tick();
+      assert.equal(reports.length, 1, 'insufficient permissions is a denial, not silence');
+      assert.equal(reports[0].code, 'SPEECH_PERMISSION_DENIED');
+      assert.equal(bridge.startCalls.length, 1, 'no segment re-open after the denial');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+
   it('should_only_log_non_permission_error_events', async () => {
     const bridge = createFakeBridge();
     const restore = withCapacitor(bridge);
@@ -789,6 +816,80 @@ describe('capacitor adapter — re-open scheduling', () => {
       resolvers.shift()({ listening: false });
       await tick(); await tick();
       assert.equal(bridge.startCalls.length, 2, 'exactly one re-open — no double start');
+    } finally {
+      restore();
+    }
+  });
+
+  it('should_not_dispatch_a_second_native_start_while_one_is_still_pending', async () => {
+    let settleStart = null;
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise((resolve, reject) => {
+        settleStart = { resolve, reject };
+      });
+    };
+    const restore = withCapacitor(bridge);
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await tick();
+      assert.equal(bridge.startCalls.length, 1, 'the first start is dispatched and pending');
+
+      // A segment-end event arrives while the first start is STILL pending:
+      // the newer re-open must skip its own dispatch, not land a second
+      // concurrent native start.
+      bridge.emit('listeningState', { state: 'stopped', reason: 'silence' });
+      await tick(); await tick();
+      assert.equal(bridge.startCalls.length, 1, 'the pending start blocks the second dispatch');
+
+      // The pending start then succeeds: the segment is open, nothing else
+      // re-opens behind it.
+      settleStart.resolve({});
+      await tick(); await tick();
+      assert.equal(bridge.startCalls.length, 1, 'the session continues on the opened segment');
+      assert.deepEqual(reports, []);
+      adapter.stop({ flush: false });
+    } finally {
+      restore();
+    }
+  });
+
+  it('should_keep_the_reopen_chain_alive_when_a_superseded_start_fails', async () => {
+    let settleStart = null;
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return new Promise((resolve, reject) => {
+        settleStart = { resolve, reject };
+      });
+    };
+    const restore = withCapacitor(bridge);
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await tick();
+      bridge.emit('listeningState', { state: 'stopped', reason: 'silence' });
+      await tick(); await tick();
+      assert.equal(bridge.startCalls.length, 1, 'the newer re-open skipped its dispatch');
+
+      // The pending start then fails: its failure handler is the only path
+      // left — it must schedule the next attempt or the session would hang
+      // forever between "skipped" and "failed".
+      settleStart.reject(new Error('Client side error'));
+      await tick(); await tick(); await tick();
+      assert.equal(bridge.startCalls.length, 2, 'the failure keeps the re-open chain alive');
+      assert.deepEqual(reports, [], 'one failed start does not end the session');
+      adapter.stop({ flush: false });
     } finally {
       restore();
     }

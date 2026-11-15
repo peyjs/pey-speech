@@ -37,7 +37,7 @@
         },
         {
           "name": "listen",
-          "description": "Starts one listening session in the given language (the configured default otherwise): partial transcriptions while the user speaks and the final transcription when a phrase settles. A second session while one is active is rejected. Long silence ends the session on the device's own terms and surfaces as interrupted with the no-speech code.",
+          "description": "Starts one listening session in the given language (the configured default otherwise): partial transcriptions while the user speaks and the final transcription when a phrase settles. A second session while one is active is rejected. Long silence ends the session on the device's own terms and surfaces as interrupted with the no-speech code (adapter-dependent: the default Capacitor/Android adapter is segment-based by design and keeps the logical session open across silences — it ends on the caller's stop, a permission failure or a hard failure streak).",
           "params": [
             {
               "name": "input",

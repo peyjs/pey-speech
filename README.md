@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Platform plugin of the Pey ecosystem: device speech recognition behind a swappable environment adapter (Web Speech API today). Support check, microphone permission, and listening sessions that deliver partial and final transcriptions — interpreting nothing.
+Platform plugin of the Pey ecosystem: device speech recognition behind a swappable environment adapter (the Web Speech API in a plain browser, the device recognizer on Android through the Capacitor bridge — the shipped default adapter picks the right one per environment). Support check, microphone permission, and listening sessions that deliver partial and final transcriptions — interpreting nothing.
 
 ## Structure
 
@@ -17,7 +17,8 @@ Platform plugin of the Pey ecosystem: device speech recognition behind a swappab
 - `lib/error.js` — standard Bonyan error factory.
 - `lib/environment-loader.js` — loads and validates the configured adapter.
 - `lib/speech-service.js` — session lifecycle, events, flow pattern.
-- `adapters/web-speech-environment-adapter.js` — Web Speech API adapter.
+- `adapters/web-speech-environment-adapter.js` — Web Speech API adapter (plain browser).
+- `adapters/capacitor-speech-environment-adapter.js` — Android adapter over the `@capgo/capacitor-speech-recognition` native plugin through the runtime-injected `window.Capacitor` bridge (one logical session over many native segments).
 - `tests/` — unit tests (`node:test`, fake adapter only).
 
 ## Dependencies
