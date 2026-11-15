@@ -69,5 +69,5 @@ test('should_match_manifest_contract_when_loaded', async () => {
   const methodNames = manifest.provides[0].methods.map((method) => method.name);
   assert.deepEqual(methodNames, ['getSupport', 'requestPermission', 'listen', 'stop']);
   assert.deepEqual(manifest.events.map((event) => event.name), ['speech:listening-started', 'speech:listening-stopped']);
-  assert.deepEqual(manifest.config, { adapter: 'WebSpeechEnvironmentAdapter', adapterConfig: {}, language: 'fa-IR' });
+  assert.deepEqual(manifest.config, { adapter: 'AutoSpeechEnvironmentAdapter', adapterConfig: {}, language: 'fa-IR' });
 });

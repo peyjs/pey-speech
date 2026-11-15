@@ -15,6 +15,7 @@ Speech-to-text through the device's own recognizer, behind a swappable environme
 - `lib/environment-loader.js` — loads and validates the configured adapter.
 - `lib/speech-service.js` — session lifecycle, events, flow pattern.
 - `adapters/web-speech-environment-adapter.js` — Web Speech API adapter (browser / WebView).
+- `adapters/capacitor-speech-environment-adapter.js` — Android adapter over the `@capgo/capacitor-speech-recognition@7` native plugin through the runtime-injected `window.Capacitor` bridge.
 - `tests/` — unit tests (`node:test`, fake adapter only).
 
 ## Dependencies
@@ -33,7 +34,7 @@ start({ language, onPartial, onFinal, end })   → { stop({ flush }) }
 stop({ flush })                                → void   (stops the adapter's active session)
 ```
 
-`start` hands the session its handlers; `end(report)` is called exactly once per session with `{ reason: 'speech' | 'no-speech' | 'error' | 'cancelled', text?, code? }`. Device errors are mapped to the plugin's codes inside the adapter — nothing raw crosses. The default `WebSpeechEnvironmentAdapter` targets the Web Speech API; a Capacitor/Android adapter is the next environment, not part of this step. In an environment without speech support the adapter still loads and reports "unsupported" — the host app must not break.
+`start` hands the session its handlers; `end(report)` is called exactly once per session with `{ reason: 'speech' | 'no-speech' | 'error' | 'cancelled', text?, code? }`. Device errors are mapped to the plugin's codes inside the adapter — nothing raw crosses. The `WebSpeechEnvironmentAdapter` targets the Web Speech API (plain browser). The `CapacitorSpeechEnvironmentAdapter` targets Android through the `@capgo/capacitor-speech-recognition@7` native plugin (device recognizer). It runs ONE logical session over MANY native segments: silence ends a segment, the native layer delivers definitive `segmentResults` and `readyForNextSession` after teardown, the adapter re-opens the next segment and streams the native-accumulated text (GBoard-style dictation); `adapterConfig` tunes `restartDelayMs`, `maxFailureRestarts`, `allowForSilenceMs` (silence window per segment) and `readyWaitMs` (fallback when the readiness signal never fires). Switched from `@capacitor-community/speech-recognition` over its open restart/stop bugs (upstream issue #127). The `AutoSpeechEnvironmentAdapter` (the shipped default) selects the Capacitor bridge when present and the Web Speech API otherwise, so one adapter config serves both worlds. In an environment without speech support the adapter still loads and reports "unsupported" — the host app must not break.
 
 **Factory errors (the documented pass-through contract):** the configured factory may throw, and the loader keeps the error's identity only when it is a standard field-shaped Bonyan error carrying one of the three startup codes — `SPEECH_ADAPTER_INITIALIZATION_FAILED`, `SPEECH_ADAPTER_INVALID` or `SPEECH_ADAPTER_NOT_FOUND` — with a string `message`, a string `source`, a standard `type` (`startup`/`operational`/`critical`) and a parseable `timestamp` (plain objects count: the shape is field-based, exactly what `createSpeechError` in this plugin builds). ANY other failure — including a prefixed-but-undeclared code or broken field values — maps to `SPEECH_ADAPTER_INITIALIZATION_FAILED` (type `startup`). These three codes are the plugin's startup-error face toward Core.
 
@@ -92,7 +93,7 @@ Raw device errors never leave the adapter; branch on `code`, never on `message`.
 
 | Key | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `adapter` | `string` | No | `'WebSpeechEnvironmentAdapter'` | Environment adapter identifier. |
+| `adapter` | `string` | No | `'AutoSpeechEnvironmentAdapter'` | Environment adapter identifier: `WebSpeechEnvironmentAdapter`, `CapacitorSpeechEnvironmentAdapter`, or `AutoSpeechEnvironmentAdapter`. |
 | `adapterConfig` | `object` | No | `{}` | Adapter-specific configuration. |
 | `language` | `string` | No | `'fa-IR'` | Default recognition language; per-call override exists. |
 

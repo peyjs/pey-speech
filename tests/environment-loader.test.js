@@ -201,3 +201,39 @@ test('should_reject_startup_with_invalid_when_the_adapter_misses_a_contract_meth
     (error) => error.code === 'SPEECH_ADAPTER_INVALID' && error.type === 'startup',
   );
 });
+
+test('should_load_the_capacitor_adapter_by_identifier', async () => {
+  const adapter = await loadEnvironmentAdapter('CapacitorSpeechEnvironmentAdapter', {});
+  for (const method of ['isSupported', 'requestPermission', 'start', 'stop']) {
+    assert.equal(typeof adapter[method], 'function', method);
+  }
+});
+
+test('should_load_the_auto_adapter_and_fall_back_to_web_speech_outside_capacitor', async () => {
+  const saved = globalThis.Capacitor;
+  delete globalThis.Capacitor;
+  try {
+    const adapter = await loadEnvironmentAdapter('AutoSpeechEnvironmentAdapter', {});
+    for (const method of ['isSupported', 'requestPermission', 'start', 'stop']) {
+      assert.equal(typeof adapter[method], 'function', method);
+    }
+    // No Capacitor bridge in this environment → the Web Speech fallback,
+    // whose support signal follows the platform API (absent in Node).
+    assert.equal(adapter.isSupported().supported, false);
+  } finally {
+    if (saved !== undefined) globalThis.Capacitor = saved;
+  }
+});
+
+test('should_load_the_auto_adapter_through_the_capacitor_bridge_when_present', async () => {
+  const saved = globalThis.Capacitor;
+  globalThis.Capacitor = { Plugins: { SpeechRecognition: {} } };
+  try {
+    const adapter = await loadEnvironmentAdapter('AutoSpeechEnvironmentAdapter', {});
+    // The Capacitor adapter reports supported whenever the bridge exists.
+    assert.equal(adapter.isSupported().supported, true);
+  } finally {
+    if (saved !== undefined) globalThis.Capacitor = saved;
+    else delete globalThis.Capacitor;
+  }
+});

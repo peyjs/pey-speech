@@ -1,6 +1,6 @@
 {
   "name": "pey.speech",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "architecture": "0.11",
   "description": "Device speech recognition as a platform capability behind a swappable environment adapter (Web Speech API today): support check, microphone permission, start/stop listening with partial and final results. Interprets nothing — transcription meaning belongs to the caller.",
   "type": "platform",
@@ -84,7 +84,7 @@
     }
   ],
   "config": {
-    "adapter": "WebSpeechEnvironmentAdapter",
+    "adapter": "AutoSpeechEnvironmentAdapter",
     "adapterConfig": {},
     "language": "fa-IR"
   }
