@@ -71,3 +71,12 @@ test('should_match_manifest_contract_when_loaded', async () => {
   assert.deepEqual(manifest.events.map((event) => event.name), ['speech:listening-started', 'speech:listening-stopped']);
   assert.deepEqual(manifest.config, { adapter: 'AutoSpeechEnvironmentAdapter', adapterConfig: {}, language: 'fa-IR' });
 });
+
+test('should_fall_back_to_the_manifest_default_adapter_when_the_config_omits_it', async () => {
+  const { DEFAULT_ADAPTER } = await import('../lib/constants.js');
+  const manifest = JSON.parse(await readFile(MANIFEST_PATH, 'utf8'));
+  // index.js resolves config.adapter ?? DEFAULT_ADAPTER: the code fallback
+  // must name the same adapter the manifest advertises as the default, or a
+  // host that omits the key gets a different adapter than documented.
+  assert.equal(DEFAULT_ADAPTER, manifest.config.adapter);
+});

@@ -1,14 +1,14 @@
 # Changelog
 
-## [1.2.0]
+## [1.2.0] - 1405-08-24
 
 ### Added
 
 - `CapacitorSpeechEnvironmentAdapter`: Android speech recognition through the `@capgo/capacitor-speech-recognition@7` native plugin via the runtime-injected `window.Capacitor` bridge (device recognizer — no Web Speech dependency). Chosen over `@capacitor-community/speech-recognition` because of its open restart/stop bugs (issue #127) that matched our field findings; Cap-go delivers native segment results, a silence window and readiness signals. Partials stream through the bridge (native `accumulatedText` preferred); permission goes through the plugin's checkPermissions/requestPermissions; permission errors end the session (`SPEECH_PERMISSION_DENIED`), everything else retries up to the failure cap.
 - `AutoSpeechEnvironmentAdapter`: selects the Capacitor bridge when present (Android build), the Web Speech API otherwise (plain browser) — one adapter config for both worlds.
 - Loader registry entries for both new adapters; manifest config default switched to `AutoSpeechEnvironmentAdapter`.
-- Final-result capture in the Capacitor adapter: Android fires 'stopped' BEFORE the definitive result — the ended segment now waits `finalWaitMs` (default 600, tunable) for the plugin's final partial and banks it verbatim, fixing both the lost tail words and the duplicated-segment text; when no final arrives the partial is banked as-is and the session continues.
-- GBoard-style session management in the Capacitor adapter: Android's recognizer closes its native session on the first pause (ERROR_NO_MATCH) — the adapter re-opens it and accumulates segment text, so dictation survives silences; a stuck native session is cleaned up before each start; consecutive native failures cap at `maxFailureRestarts` (default 3, tunable via adapterConfig `restartDelayMs`/`maxFailureRestarts`) before the session surfaces an error.
+- Definitive segment capture in the Capacitor adapter: Android fires 'stopped' BEFORE the definitive result — the native `segmentResults` event banks the ended segment's text with the native accumulation (`accumulatedText`) preferred, and a segment result can never shorten the running text (a segment's own result only covers its own words), fixing both the lost tail words and the duplicated-segment text; when no segment result arrives the last partial stands and the session continues.
+- GBoard-style session management in the Capacitor adapter: Android's recognizer closes its native session on the first pause (ERROR_NO_MATCH) — the adapter re-opens it and accumulates segment text, so dictation survives silences; a stuck native session is cleaned up before each start (`segmentSettleMs` waits out the async native teardown, default 250); consecutive native failures — failed starts AND error events with no text in between — cap at `maxFailureRestarts` (default 3, tunable via adapterConfig `restartDelayMs`/`readyWaitMs`/`maxFailureRestarts`) before the session surfaces an error. Re-opens are token-scheduled, so a fallback re-open and a readiness re-open can never both land on the recognizer.
 
 ## [1.1.0] - 1405-08-22
 

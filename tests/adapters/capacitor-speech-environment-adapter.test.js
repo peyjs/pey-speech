@@ -414,7 +414,12 @@ describe('capacitor adapter — silence handling', () => {
     }
   });
 
-  it('should_settle_after_stopping_a_busy_recognizer_before_reopening', async () => {
+  it('should_settle_after_stopping_a_busy_recognizer_before_reopening', async (t) => {
+    // Mocked clock: the settle window is asserted against the clock, not
+    // against a real sleep. setImmediate stays real — a macrotask turn that
+    // drains the adapter's microtask chain without touching the clock.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
     const bridge = createFakeBridge({ isListening: async () => ({ listening: true }) });
     const restore = withCapacitor(bridge);
     try {
@@ -424,11 +429,12 @@ describe('capacitor adapter — silence handling', () => {
       adapter.start({
         language: 'fa-IR', onPartial: () => {}, onFinal: () => {}, end: () => {},
       });
-      await tick(); await tick(); await tick();
-      // The teardown wait is real: the stop happened, the start did not yet.
+      await flush(); await flush();
+      // The teardown wait is honored: the stop happened, the start did not yet.
       assert.equal(bridge.stopCalls, 1, 'the busy recognizer was stopped');
       assert.equal(bridge.startCalls.length, 0, 'no start during the settle window');
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      t.mock.timers.tick(40);
+      await flush(); await flush();
       assert.equal(bridge.startCalls.length, 1, 'the fresh segment opens after the settle');
       adapter.stop({ flush: false });
     } finally {
@@ -564,6 +570,225 @@ describe('capacitor adapter — permissions', () => {
     try {
       const outcome = await createCapacitorSpeechEnvironmentAdapter().requestPermission();
       assert.deepEqual(outcome, { granted: false });
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('capacitor adapter — guarded start dispatch', () => {
+  it('should_end_the_session_when_the_bridge_start_throws_synchronously', async () => {
+    const bridge = createFakeBridge();
+    delete bridge.start;
+    const restore = withCapacitor(bridge);
+    try {
+      const reports = [];
+      createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, maxFailureRestarts: 0 }).start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await tick(); await tick(); await tick();
+      assert.equal(reports.length, 1, 'the broken bridge cannot leave the session open');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+    } finally {
+      restore();
+    }
+  });
+
+  it('should_keep_the_session_alive_when_the_bridge_start_returns_a_non_thenable', async () => {
+    const bridge = createFakeBridge();
+    bridge.start = (...args) => {
+      bridge.startCalls.push(args[args.length - 1]);
+      return undefined;
+    };
+    const restore = withCapacitor(bridge);
+    try {
+      const partials = [];
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: (text) => partials.push(text), onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      await tick(); await tick();
+      bridge.emit('partialResults', { accumulatedText: 'امروز' });
+      assert.deepEqual(partials, ['امروز'], 'the odd bridge shape never crashes the session');
+      assert.deepEqual(reports, []);
+      adapter.stop({ flush: false });
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('capacitor adapter — definitive segment capture', () => {
+  it('should_never_let_a_segment_result_shorten_the_running_text', async () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    try {
+      const finals = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: (text) => finals.push(text),
+        end: () => {},
+      });
+      await tick();
+      bridge.emit('partialResults', { accumulatedText: 'امروز هزار' });
+      // The segment's own result covers only this segment; banking it
+      // verbatim would drop the earlier segments' words.
+      bridge.emit('segmentResults', { matches: ['هزار'] });
+      assert.deepEqual(finals, ['امروز هزار'], 'the running text is preserved');
+      adapter.stop({ flush: false });
+    } finally {
+      restore();
+    }
+  });
+
+  it('should_bank_the_native_accumulation_when_segment_results_carry_it', async () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    try {
+      const finals = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: (text) => finals.push(text),
+        end: () => {},
+      });
+      await tick();
+      bridge.emit('segmentResults', { matches: ['تومان'], accumulatedText: 'امروز هزار تومان' });
+      assert.deepEqual(finals, ['امروز هزار تومان'], 'the accumulation wins');
+      adapter.stop({ flush: false });
+    } finally {
+      restore();
+    }
+  });
+
+  it('should_bank_a_longer_segment_result_without_an_accumulation', async () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    try {
+      const finals = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: (text) => finals.push(text),
+        end: () => {},
+      });
+      await tick();
+      bridge.emit('segmentResults', { matches: ['امروز هزار تومان'] });
+      assert.deepEqual(finals, ['امروز هزار تومان'], 'the first segment banks verbatim');
+      adapter.stop({ flush: false });
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('capacitor adapter — transient error streak', () => {
+  it('should_end_the_session_after_a_streak_of_error_events_without_text', () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 }).start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      for (let round = 0; round < 4; round += 1) {
+        bridge.emit('error', { code: 'SPEECH_ERROR', message: `transient hiccup ${round}` });
+      }
+      assert.equal(reports.length, 1, 'error events with no text in between are a hard failure');
+      assert.equal(reports[0].code, 'SPEECH_SERVICE_UNAVAILABLE');
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+
+  it('should_reset_the_error_streak_when_text_keeps_flowing', () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      // One error, then recognized text, then three more errors: the streak
+      // reset in between keeps the session alive (3 is not past the cap of 3).
+      bridge.emit('error', { code: 'SPEECH_ERROR', message: 'hiccup' });
+      bridge.emit('partialResults', { accumulatedText: 'امروز' });
+      bridge.emit('error', { code: 'SPEECH_ERROR', message: 'hiccup' });
+      bridge.emit('error', { code: 'SPEECH_ERROR', message: 'hiccup' });
+      bridge.emit('error', { code: 'SPEECH_ERROR', message: 'hiccup' });
+      assert.deepEqual(reports, [], 'a recognizing device is not failing');
+      adapter.stop({ flush: false });
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+
+  it('should_not_treat_a_permission_state_probe_as_a_denial', () => {
+    const bridge = createFakeBridge();
+    const restore = withCapacitor(bridge);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const reports = [];
+      const adapter = createCapacitorSpeechEnvironmentAdapter({ restartDelayMs: 0, readyWaitMs: 0 });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {},
+        end: (report) => reports.push(report),
+      });
+      bridge.emit('error', { message: 'failed to query permission state' });
+      assert.deepEqual(reports, [], 'mentioning permission is not denying it');
+      adapter.stop({ flush: false });
+    } finally {
+      console.warn = originalWarn;
+      restore();
+    }
+  });
+});
+
+describe('capacitor adapter — re-open scheduling', () => {
+  it('should_abort_an_in_flight_attempt_when_a_newer_reopen_is_scheduled', async () => {
+    // Deterministic suspension: every isListening call parks its resolver in
+    // a queue the test controls.
+    const resolvers = [];
+    const bridge = createFakeBridge({
+      isListening: () => new Promise((resolve) => resolvers.push(resolve)),
+    });
+    const restore = withCapacitor(bridge);
+    try {
+      const adapter = createCapacitorSpeechEnvironmentAdapter({
+        restartDelayMs: 0, readyWaitMs: 0, segmentSettleMs: 0,
+      });
+      adapter.start({
+        language: 'fa-IR', onPartial: () => {}, onFinal: () => {}, end: () => {},
+      });
+      await tick();
+      assert.equal(resolvers.length, 1);
+      resolvers.shift()({ listening: false });
+      await tick();
+      assert.equal(bridge.startCalls.length, 1, 'the first segment opened');
+
+      // The fallback re-open is scheduled, its attempt parks on isListening
+      // — and THEN readiness arrives: the newer schedule must supersede the
+      // parked attempt, so exactly one re-open lands.
+      bridge.emit('listeningState', { state: 'stopped', reason: 'silence' });
+      await tick();
+      assert.equal(resolvers.length, 1, 'the parked attempt is inside isListening');
+      bridge.emit('readyForNextSession', {});
+      resolvers.shift()({ listening: false });
+      await tick();
+      resolvers.shift()({ listening: false });
+      await tick(); await tick();
+      assert.equal(bridge.startCalls.length, 2, 'exactly one re-open — no double start');
     } finally {
       restore();
     }

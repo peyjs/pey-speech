@@ -21,9 +21,15 @@
 // native layer ends a segment on silence and reports it; this adapter
 // re-opens the next segment when the bridge signals readiness, keeps the
 // accumulated text flowing through onPartial/onFinal, and only the caller's
-// stop (or a hard failure streak) ends the logical session.
+// stop (or a hard failure streak) ends the logical session. Re-opens are
+// token-scheduled — a newer schedule supersedes an older one, so no path can
+// open two native segments at once.
 
-const START_ERROR_PERMISSION_MARKERS = Object.freeze(['denied', 'permission']);
+// A permission failure is terminal — but only a genuine denial wording
+// counts: "failed to query permission state" mentions permission too and
+// must not end the session as a denial.
+const PERMISSION_HINT_PATTERN = /permission/;
+const PERMISSION_DENIED_PATTERN = /denied|required|missing|not granted|rejected/;
 
 // Android's recognizer reports ordinary silence as an error event with
 // device-specific wording (ERROR_NO_MATCH / ERROR_SPEECH_TIMEOUT): "No
@@ -61,7 +67,7 @@ function capacitorSpeechPlugin() {
  */
 function mapStartError(error) {
   const raw = `${error?.message ?? error?.code ?? error ?? ''}`.toLowerCase();
-  const permission = START_ERROR_PERMISSION_MARKERS.some((marker) => raw.includes(marker));
+  const permission = PERMISSION_HINT_PATTERN.test(raw) && PERMISSION_DENIED_PATTERN.test(raw);
   return permission ? 'SPEECH_PERMISSION_DENIED' : 'SPEECH_SERVICE_UNAVAILABLE';
 }
 
@@ -99,10 +105,12 @@ function textFromPartial(data) {
  * Creates the Capacitor SpeechRecognition environment adapter.
  *
  * @param {object} [adapterConfig] Adapter tuning: restartDelayMs (segment
- *   re-open delay, default 250), maxFailureRestarts (consecutive failed
- *   native starts tolerated before surfacing an error, default 3),
- *   allowForSilenceMs (Android silence window per segment, default 1500),
- *   readyWaitMs (fallback wait for readyForNextSession, default 1500) and
+ *   re-open delay after readiness or a failed start, default 250),
+ *   maxFailureRestarts (consecutive failed native starts — or consecutive
+ *   native error events with no text in between — tolerated before
+ *   surfacing an error, default 3), allowForSilenceMs (Android silence
+ *   window per segment, default 1500), readyWaitMs (fallback wait before
+ *   re-opening when the readiness signal never fires, default 1500) and
  *   segmentSettleMs (wait after stopping a busy recognizer, default 250).
  * @returns {object} Environment adapter over the internal contract.
  */
@@ -199,22 +207,24 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
       let ended = false;
       let callerStopped = false;
       let consecutiveFailures = 0;
-      let restartScheduled = false;
+      // Consecutive native error events with no text in between: the same
+      // "hard failure streak" notion as failed starts, for errors that
+      // arrive while no start is pending. Text resets the streak — a device
+      // that keeps recognizing is not failing.
+      let consecutiveErrorEvents = 0;
+      // Monotonic token for scheduled re-opens: a newer schedule supersedes
+      // an older one, and a superseded attempt aborts at its next await —
+      // no path can land two native starts in the air at once.
+      let restartToken = 0;
+      let restartTimer = null;
       let lastKnownText = null;
-      let startTimer = null;
-      let readyTimer = null;
       const handles = [];
 
       const clearTimers = () => {
-        if (startTimer !== null) {
-          clearTimeout(startTimer);
-          startTimer = null;
+        if (restartTimer !== null) {
+          clearTimeout(restartTimer);
+          restartTimer = null;
         }
-        if (readyTimer !== null) {
-          clearTimeout(readyTimer);
-          readyTimer = null;
-        }
-        restartScheduled = false;
       };
 
       const removeListeners = () => {
@@ -241,16 +251,29 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
       const setLastKnown = (text) => {
         if (typeof text === 'string' && text.trim() !== '') {
           lastKnownText = text;
+          consecutiveErrorEvents = 0;
         }
       };
 
+      const scheduleAttempt = (delay) => {
+        clearTimers();
+        restartToken += 1;
+        const token = restartToken;
+        restartTimer = setTimeout(() => {
+          restartTimer = null;
+          void runAttempt(token);
+        }, delay);
+      };
+
       /**
-       * Opens the next native segment inside the same logical session.
-       * A permission rejection is terminal; any other failure retries up
-       * to maxFailureRestarts consecutive times before surfacing.
+       * Opens the next native segment inside the same logical session. A
+       * permission rejection is terminal; any other failure retries up to
+       * maxFailureRestarts consecutive times before surfacing.
+       * @param {number} token The schedule token that launched this attempt.
+       * @returns {Promise<void>}
        */
-      const attempt = async () => {
-        if (ended || callerStopped) {
+      const runAttempt = async (token) => {
+        if (ended || callerStopped || token !== restartToken) {
           return;
         }
         if (consecutiveFailures > maxFailureRestarts) {
@@ -280,45 +303,46 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         } catch {
           // Nothing to clean up — the start attempt reports its own error.
         }
-        if (ended || callerStopped) {
+        if (ended || callerStopped || token !== restartToken) {
           return;
         }
-        restartScheduled = false;
-        const startCall = bridge.start({
-          language,
-          partialResults: true,
-          maxResults: 5,
-          popup: false,
-          allowForSilence: allowForSilenceMs,
-        });
-        startCall.then(() => {
-          consecutiveFailures = 0;
-        }).catch((error) => {
-          if (ended || callerStopped) {
-            return;
-          }
-          // Some devices reject start() with ordinary silence instead of an
-          // error event — same treatment: a quiet segment end, no failure
-          // counting.
-          if (isNoSpeechError(error)) {
-            if (!restartScheduled) {
-              restartScheduled = true;
-              readyTimer = setTimeout(() => void attempt(), readyWaitMs);
+        // The dispatch is fully guarded: a bridge whose start() throws
+        // synchronously (or returns a non-thenable) flows into the same
+        // failure mapping as a rejected promise — no unhandled rejection,
+        // and the session always keeps its end report.
+        Promise.resolve()
+          .then(() => bridge.start({
+            language,
+            partialResults: true,
+            maxResults: 5,
+            popup: false,
+            allowForSilence: allowForSilenceMs,
+          }))
+          .then(() => {
+            consecutiveFailures = 0;
+          })
+          .catch((error) => {
+            if (ended || callerStopped || token !== restartToken) {
+              return;
             }
-            return;
-          }
-          const code = mapStartError(error);
-          // The native rejection message is the only diagnostic the device
-          // gives — keep it on the console behind the mapped code.
-          console.warn(`[pey.speech] native segment failed (${code}):`, error?.message ?? error);
-          if (code === 'SPEECH_PERMISSION_DENIED') {
-            finish({ reason: 'error', code, text: lastKnownText });
-            return;
-          }
-          consecutiveFailures += 1;
-          restartScheduled = true;
-          startTimer = setTimeout(() => void attempt(), restartDelayMs);
-        });
+            // Some devices reject start() with ordinary silence instead of
+            // an error event — same treatment: a quiet segment end, no
+            // failure counting.
+            if (isNoSpeechError(error)) {
+              scheduleAttempt(readyWaitMs);
+              return;
+            }
+            const code = mapStartError(error);
+            // The native rejection message is the only diagnostic the device
+            // gives — keep it on the console behind the mapped code.
+            console.warn(`[pey.speech] native segment failed (${code}):`, error?.message ?? error);
+            if (code === 'SPEECH_PERMISSION_DENIED') {
+              finish({ reason: 'error', code, text: lastKnownText });
+              return;
+            }
+            consecutiveFailures += 1;
+            scheduleAttempt(restartDelayMs);
+          });
       };
 
       try {
@@ -331,11 +355,23 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         }));
         handles.push(bridge.addListener('segmentResults', (data) => {
           // The definitive result of one ended segment (Android): the tail
-          // words the partials may have missed live here.
+          // words the partials may have missed live here. matches[0] is the
+          // ended segment's OWN text, not the accumulation — banking it
+          // verbatim could shorten the running text (the earlier segments'
+          // words live only in accumulatedText). The native accumulation
+          // wins when the payload carries it; otherwise the segment text is
+          // banked only when it does not regress the running text.
           const matches = Array.isArray(data?.matches) ? data.matches : [];
           const best = matches.length > 0 ? matches[0] : null;
           if (typeof best === 'string' && best.trim() !== '') {
-            setLastKnown(best);
+            const accumulated = typeof data?.accumulatedText === 'string' && data.accumulatedText.trim() !== ''
+              ? data.accumulatedText
+              : null;
+            if (accumulated !== null) {
+              setLastKnown(accumulated);
+            } else if (lastKnownText === null || best.length >= lastKnownText.length) {
+              setLastKnown(best);
+            }
             onFinal?.(lastKnownText);
           }
         }));
@@ -351,30 +387,40 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
           // session alive with the usual fallback re-open, no warn spam, no
           // failure counting.
           if (isNoSpeechError(data)) {
-            if (!ended && !callerStopped && !restartScheduled) {
-              restartScheduled = true;
-              readyTimer = setTimeout(() => void attempt(), readyWaitMs);
-            }
+            scheduleAttempt(readyWaitMs);
             return;
           }
-          // Anything else is transient: logged and left to the segment
-          // restart logic.
+          // Anything else is transient: logged, and the logical session is
+          // kept alive with a bounded fallback re-open — but a streak of
+          // error events with no text in between is a hard failure, not
+          // silence, and ends the session like a failed-start streak does.
           console.warn(`[pey.speech] native error (${data?.code ?? 'unknown'}):`, data?.message ?? data);
+          consecutiveErrorEvents += 1;
+          if (consecutiveErrorEvents > maxFailureRestarts) {
+            finish({
+              reason: 'error',
+              code: 'SPEECH_SERVICE_UNAVAILABLE',
+              text: lastKnownText,
+            });
+            return;
+          }
+          scheduleAttempt(readyWaitMs);
         }));
         handles.push(bridge.addListener('listeningState', (data) => {
           // A segment ended (silence/results/error): the bridge reports
           // readiness separately — schedule a fallback re-open in case
           // readyForNextSession never arrives.
-          if (data?.state === 'stopped' && !ended && !callerStopped && !restartScheduled) {
-            restartScheduled = true;
-            readyTimer = setTimeout(() => void attempt(), readyWaitMs);
+          if (data?.state === 'stopped' && !ended && !callerStopped) {
+            scheduleAttempt(readyWaitMs);
           }
         }));
         handles.push(bridge.addListener('readyForNextSession', () => {
-          // Native teardown finished — the safe moment to re-open.
+          // Native teardown finished — the safe moment to re-open. The
+          // fresh schedule supersedes any pending fallback (and aborts an
+          // in-flight attempt at its next await), so exactly one re-open
+          // lands.
           if (!ended && !callerStopped) {
-            clearTimers();
-            startTimer = setTimeout(() => void attempt(), restartDelayMs);
+            scheduleAttempt(restartDelayMs);
           }
         }));
       } catch {
@@ -382,7 +428,7 @@ export function createCapacitorSpeechEnvironmentAdapter(adapterConfig = {}) {
         return { stop: () => {} };
       }
 
-      void attempt();
+      void runAttempt(++restartToken);
 
       const control = {
         stop: ({ flush }) => {
