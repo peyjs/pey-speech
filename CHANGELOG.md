@@ -1,41 +1,46 @@
-# Changelog
+# تاریخچه تغییرات
+
+تمام تغییرات این پروژه در همین فایل ثبت می‌شود.
+قالب فایل بر پایه‌ی [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) و نسخه‌گذاری بر پایه‌ی [Semantic Versioning](https://semver.org/) است.
 
 ## [1.2.0] - 1405-08-24
 
-### Added
+### افزوده‌شده
 
-- `CapacitorSpeechEnvironmentAdapter`: Android speech recognition through the `@capgo/capacitor-speech-recognition@7` native plugin via the runtime-injected `window.Capacitor` bridge (device recognizer — no Web Speech dependency). Chosen over `@capacitor-community/speech-recognition` because of its open restart/stop bugs (issue #127) that matched our field findings; Cap-go delivers native segment results, a silence window and readiness signals. Partials stream through the bridge (native `accumulatedText` preferred); permission goes through the plugin's checkPermissions/requestPermissions; permission errors end the session (`SPEECH_PERMISSION_DENIED`), everything else retries up to the failure cap.
-- `AutoSpeechEnvironmentAdapter`: selects the Capacitor bridge when present (Android build), the Web Speech API otherwise (plain browser) — one adapter config for both worlds.
-- Loader registry entries for both new adapters; manifest config default switched to `AutoSpeechEnvironmentAdapter`.
-- Definitive segment capture in the Capacitor adapter: Android fires 'stopped' BEFORE the definitive result — the native `segmentResults` event banks the ended segment's text with the native accumulation (`accumulatedText`) preferred, and a segment result can never shorten the running text (a segment's own result only covers its own words), fixing both the lost tail words and the duplicated-segment text; when no segment result arrives the last partial stands and the session continues.
-- GBoard-style session management in the Capacitor adapter: Android's recognizer closes its native session on the first pause (ERROR_NO_MATCH) — the adapter re-opens it and accumulates segment text, so dictation survives silences; a stuck native session is cleaned up before each start (`segmentSettleMs` waits out the async native teardown, default 250); consecutive native failures — failed starts AND error events with no text in between — cap at `maxFailureRestarts` (default 3, tunable via adapterConfig `restartDelayMs`/`readyWaitMs`/`maxFailureRestarts`) before the session surfaces an error. Re-opens are token-scheduled and the native start dispatch is serialized, so a fallback re-open and a readiness re-open can never both land on the recognizer (at most one native start is ever tracked in flight); a native start that never settles is abandoned after `startTimeoutMs` (default 5000) and counted toward the failure cap, so a wedged bridge cannot hang the session silently.
+- آداپتور `CapacitorSpeechEnvironmentAdapter` برای تشخیص گفتار اندروید از طریق پل Capacitor افزوده شد.
+- آداپتور `AutoSpeechEnvironmentAdapter` بسته به محیط، پل Capacitor یا Web Speech را برمی‌گزیند و پیش‌فرض پیکربندی شد.
+- ثبت نتایج قطعی بخش‌ها با ترجیح انباشت بومی `accumulatedText` اجرا شد و نتیجهٔ هر بخش هرگز متن در جریان را کوتاه نمی‌کند.
+- مدیریت نشست به سبک GBoard اجرا شد: بازگشایی خودکار پس از سکوت، پاک‌سازی نشست گیرکرده، سقف شکست‌های پشت‌سرهم و رهایش شروعِ بی‌پاسخ با تنظیم‌های `restartDelayMs`، `readyWaitMs`، `maxFailureRestarts` و `startTimeoutMs`.
 
 ## [1.1.0] - 1405-08-22
 
-### Fixed
+### دگرگون‌شده
 
-- **The adapter factory boundary is fail-safe and field-shaped**: only a standard-structured Bonyan error carrying one of the three declared startup codes (`SPEECH_ADAPTER_INITIALIZATION_FAILED` / `_INVALID` / `_NOT_FOUND`) with valid field values crosses with its identity — anything else (prefixed-but-undeclared codes, broken fields, plain objects, non-Error instances) maps to the initialization failure; the contract is documented in the reference's adapter section and locked by a two-way doc/code sync test.
-- **The adapter registry resolves through own keys only**: a configured `constructor`/`valueOf`/`hasOwnProperty` is `SPEECH_ADAPTER_NOT_FOUND`, never a forged validation failure.
-- **Session lifecycle is leak-proof**: `deactivate` with a throwing device stop still settles the session (`done` resolves `cancelled`, `speech:listening-stopped` fires); a session the device aborts inside `start()` publishes no events; a session locked after a simultaneous failure cannot be double-started; stale handles are never reused; aborted recognitions map to their own ending.
-- **Declared contracts match behavior**: `getSupport` shapes the report into exactly `{ supported, processing }`; `requestPermission` reads only a real boolean `true` as granted; `stop` declares `SPEECH_SERVICE_UNAVAILABLE`; `listen` declares `SPEECH_PERMISSION_DENIED`/`SPEECH_NO_SPEECH`; the configured default language is trimmed like the per-call override; the loader's exported code set is named for its meaning (`ADAPTER_FACTORY_ERROR_CODES` vs the service's `ADAPTER_END_ERROR_CODES`).
-- All test names follow the standard `should_..._when_...` convention; the doc/code sync test reads the reference itself (87 tests).
+- نام آزمون‌ها به قالب `should_…_when_…` یکدست شد و آزمون همگامی سند/کد خود مرجع را می‌خواند.
+
+### برطرف‌شده
+
+- مرز کارخانهٔ آداپتور فقط خطای ساخت‌یافتهٔ استاندارد با سه کد اعلام‌شدهٔ startup را با هویتش عبور می‌دهد.
+- رجیستری آداپتور فقط از کلیدهای خودی حل می‌شود.
+- چرخهٔ عمر نشست بدون نشتی شد: توقف پرتاب‌کنندهٔ دستگاه هم نشست را می‌بندد و handleهای کهنه بازاستفاده نمی‌شوند.
+- قراردادهای اعلام‌شده با رفتار همگام شدند: `getSupport`، `requestPermission`، `stop`، `listen` و برش زبان پیش‌فرض.
 
 ## [1.0.1] - 1405-08-15
 
-### Fixed
+### دگرگون‌شده
 
-- A malformed error code in an adapter's end report no longer crashes the error factory (leaving `done` pending forever): the code is shape-checked and falls back to `SPEECH_SERVICE_UNAVAILABLE`.
-- Raw adapter failures can no longer cross the boundary: `isSupported`, the session stop (handle, service `stop`) and `deactivate` are all guarded — a throwing device stop resolves `done` as a recognizer failure, and `deactivate` can never break the shutdown cycle.
-- `stop` declares `SERVICE_UNAVAILABLE` in the manifest and the reference; the stale `PLUGIN_VERSION` constant and the stale README version badge are gone; the bare `SERVICE_UNAVAILABLE` deactivation code is explicitly locked in the constants test (architecture-wide standard, shared with pey-prefs/pey-chat/pey-llm).
-- The adapter contract suite now also runs against the service-level fake; new adapter tests cover the permission grant with track release, `resultIndex` handling with cumulative results, and the undefined-error mapping.
-- A recognizer that failed to start synchronously wedged the session lock forever and published `listening-started` after `listening-stopped` — the service now detects the already-ended session and refuses to re-arm it.
-- Fixed: a session handle from a finished session could cancel a newer one; each handle now owns its own session control.
-- Fixed: the device-error table's deliberate-stop `aborted: null` entry was swallowed by nullish coalescing and reported as a recognizer failure.
-- `stop()` now refuses with `SERVICE_UNAVAILABLE` after deactivation (requirement rule 6: every call).
-- `SPEECH_SERVICE_UNAVAILABLE` is declared in the manifest for `requestPermission` and `listen`.
-- `npm test` discovers the whole tree (`node --test`) — the adapter tests were outside the delivery gate; the shared adapter-contract suite runs against the real Web Speech adapter and a fake; the fake service adapter now implements the full four-method contract.
-- New tests: the adapter's supported paths with a fake SpeechRecognition constructor (result distribution, error mapping, flush/cancel, exactly-one-end), loader NOT_FOUND/INVALID/INITIALIZATION_FAILED, and per-source test files (`environment-loader`, `error`, `constants`); `tests/entry.test.js` renamed to `tests/index.test.js` and the adapter test file to `web-speech-environment-adapter.test.js` (54 tests).
+- آزمون‌های آداپتور با فیک `SpeechRecognition` افزوده شدند و فایل‌های آزمون بر پایهٔ منبع چیده شدند.
+
+### برطرف‌شده
+
+- کد بدشکل در گزارش پایان آداپتور دیگر کارخانهٔ خطا را نمی‌شکند و به `SPEECH_SERVICE_UNAVAILABLE` برمی‌گردد.
+- شکست‌های خام آداپتور در `isSupported`، توقف نشست و `deactivate` گارد گرفتند.
+- `stop` پس از غیرفعال‌سازی با `SERVICE_UNAVAILABLE` رد می‌شود و `SPEECH_SERVICE_UNAVAILABLE` در مانیفست برای `requestPermission` و `listen` اعلام شد.
+- نشستی که شروع همگنش شکست خورد دیگر قفل نمی‌ماند و ترتیب رویدادها حفظ می‌شود.
+- handle نشست پایان‌یافته دیگر نشست تازه را لغو نمی‌کند.
+- ثبت «توقف عمدی» جدول خطای دستگاه که در coalesce بی‌صدا بلعیده می‌شد اصلاح شد.
+- اسکریپت آزمون به کشف بازگشتی (`node --test`) تغییر کرد و سوئیت قرارداد آداپتور علیه آداپتور واقعی و جعلی اجرا می‌شود.
 
 ## [1.0.0] - 1405-08-13
 
-Initial release: device speech recognition as a platform capability — support check with local/cloud/unknown processing report, explicit permission request (never at startup), single-session listening over the shared flow pattern (partial and final transcription handlers, a handle with stop/cancel and a done promise resolving completed/interrupted/cancelled), device errors mapped to structured codes (`SPEECH_UNSUPPORTED`, `SPEECH_PERMISSION_DENIED`, `SPEECH_NO_SPEECH`, `SPEECH_SERVICE_UNAVAILABLE`, `SPEECH_SESSION_ACTIVE`), the `speech:listening-started`/`speech:listening-stopped` events carrying no text, and a swappable environment adapter (Web Speech API default; unsupported environments degrade to a detectable report, never a crash). `docs/requirements.md` (numbered pey format) is the construction source of truth.
+نخستین انتشار: تشخیص گفتار دستگاه به‌شکل قابلیت پلتفرمی — بررسی پشتیبانی با گزارش پردازش محلی/ابری، درخواست صریح مجوز میکروفن، نشست تک‌شنود با الگوی جریان مشترک، نگاشت خطاهای دستگاه به کدهای ساخت‌یافته، رویدادهای شروع و پایان شنود بدون متن، و آداپتور محیط قابل‌تعویض با پیش‌فرض Web Speech API.

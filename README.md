@@ -1,32 +1,38 @@
 # pey.speech
 
 [![AI](https://img.shields.io/badge/Built%20with-AI-blueviolet)](#)
+[![version](https://img.shields.io/badge/version-1.2.0-blue.svg)](#)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Bonyan Architecture](https://img.shields.io/badge/bonyan-0.11-56c3bf)](https://github.com/barnevis/bonyan)
 
-## Purpose
+## هدف
 
-Platform plugin of the Pey ecosystem: device speech recognition behind a swappable environment adapter (the Web Speech API in a plain browser, the device recognizer on Android through the Capacitor bridge — the shipped default adapter picks the right one per environment). Support check, microphone permission, and listening sessions that deliver partial and final transcriptions — interpreting nothing.
+افزونه‌ی پلتفرمی از زیست‌بوم پی برای تشخیص گفتار دستگاه از مسیر آداپتور محیط قابل‌تعویض (Web Speech API در مرورگر ساده، تشخیص‌دهندهٔ دستگاه در اندروید از طریق پل Capacitor — آداپتور پیش‌فرض shipped بسته به محیط درست را برمی‌گزیند). بررسی پشتیبانی، مجوز میکروفن و نشست‌های شنود با تحویل متن‌های ناقص و نهایی؛ هیچ چیزی تفسیر نمی‌کند.
 
-## Structure
+## ساختار
 
-- `docs/requirements.md` — requirements; the construction source of truth.
-- `manifest.json` — plugin contract (identity, service, events, config).
-- `index.js` — Bonyan two-phase entry point (`prepare` / `activate`).
-- `lib/constants.js` — plugin names, error codes, defaults.
-- `lib/error.js` — standard Bonyan error factory.
-- `lib/environment-loader.js` — loads and validates the configured adapter.
-- `lib/speech-service.js` — session lifecycle, events, flow pattern.
-- `adapters/web-speech-environment-adapter.js` — Web Speech API adapter (plain browser).
-- `adapters/capacitor-speech-environment-adapter.js` — Android adapter over the `@capgo/capacitor-speech-recognition` native plugin through the runtime-injected `window.Capacitor` bridge (one logical session over many native segments).
-- `tests/` — unit tests (`node:test`, fake adapter only).
+- `adapters/` — آداپتورهای محیط.
+- `docs/` — سندهای پروژه.
+- `lib/` — منطق سرویس.
+- `tests/` — آزمون‌های افزونه.
+- `index.js` — نقطه‌ی ورود.
+- `manifest.json` — قرارداد افزونه.
 
-## Dependencies
+## وابستگی‌ها
 
-- **Required:** none.
-- **Optional:** none.
+- **الزامی:** ندارد.
+- **اختیاری:** ندارد.
 
-## See Also
+## نصب و استفاده
 
-- [docs/requirements.md](docs/requirements.md) for the "what and why", written before the implementation.
-- [docs/reference.md](docs/reference.md) for the full API, events, errors, config, business rules, and constraints.
+افزونه با `manifest.json` و بستهٔ npm به برنامه‌ی میزبان افزوده می‌شود و پس از دو فاز آماده‌سازی و فعال‌سازی، سرویس `pey.speech.service` را عرضه می‌کند. میزبان با `getSupport` پشتیبانی محیط را می‌سنجد، با `requestPermission` مجوز می‌گیرد و با `listen` نشست شنود را با دو دستیار متن ناقص و نهایی باز می‌کند؛ آداپتور محیط و زبان پیش‌فرض با کلیدهای `adapter`، `adapterConfig` و `language` تنظیم می‌شوند.
+
+## مجوز
+
+این پروژه با مجوز MIT منتشر شده است؛ متن کامل در [LICENSE](LICENSE).
+
+## سندهای مرتبط
+
+- [معرفی](docs/introduction.md) — شناخت افزونه به زبان ساده.
+- [مرجع](docs/reference.md) — API، رویدادها، خطاها و پیکربندی.
+- [نیازمندی‌ها](docs/requirements.md) — سند ساخت افزونه، مکتوب پیش از پیاده‌سازی.

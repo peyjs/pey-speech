@@ -18,12 +18,7 @@ Speech-to-text through the device's own recognizer, behind a swappable environme
 - `adapters/capacitor-speech-environment-adapter.js` — Android adapter over the `@capgo/capacitor-speech-recognition@7` native plugin through the runtime-injected `window.Capacitor` bridge.
 - `tests/` — unit tests (`node:test`, fake adapter only).
 
-## Dependencies
-
-- **Required:** none.
-- **Optional:** none.
-
-## Environment adapter (internal contract)
+### The environment adapter (internal contract)
 
 Like `pey.filesystem`, the platform type hides the environment behind an internal adapter, selectable by configuration (`config.adapter`) and loaded through a loader registry:
 
@@ -37,6 +32,11 @@ stop({ flush })                                → void   (stops the adapter's a
 `start` hands the session its handlers; `end(report)` is called exactly once per session with `{ reason: 'speech' | 'no-speech' | 'error' | 'cancelled', text?, code? }`. Device errors are mapped to the plugin's codes inside the adapter — nothing raw crosses. The `WebSpeechEnvironmentAdapter` targets the Web Speech API (plain browser). The `CapacitorSpeechEnvironmentAdapter` targets Android through the `@capgo/capacitor-speech-recognition@7` native plugin (device recognizer). It runs ONE logical session over MANY native segments: silence ends a segment, the native layer delivers definitive `segmentResults` and `readyForNextSession` after teardown, the adapter re-opens the next segment and streams the native-accumulated text (GBoard-style dictation); `adapterConfig` tunes `restartDelayMs` (re-open delay after readiness or a failed start), `maxFailureRestarts` (consecutive failed starts — or consecutive error events with no text in between — tolerated before the session ends), `allowForSilenceMs` (silence window per segment), `readyWaitMs` (fallback wait when the readiness signal never fires), `segmentSettleMs` (wait after stopping a busy recognizer before re-opening) and `startTimeoutMs` (time guard: a native start that never settles is abandoned, counted as a failure and the session never hangs, default 5000). Re-opens are token-scheduled and the start dispatch is serialized: a newer re-open supersedes a pending one, and at most one native start is ever tracked in flight. Switched from `@capacitor-community/speech-recognition` over its open restart/stop bugs (upstream issue #127). The `AutoSpeechEnvironmentAdapter` (the shipped default) selects the Capacitor bridge when present and the Web Speech API otherwise, so one adapter config serves both worlds. In an environment without speech support the adapter still loads and reports "unsupported" — the host app must not break.
 
 **Factory errors (the documented pass-through contract):** the configured factory may throw, and the loader keeps the error's identity only when it is a standard field-shaped Bonyan error carrying one of the three startup codes — `SPEECH_ADAPTER_INITIALIZATION_FAILED`, `SPEECH_ADAPTER_INVALID` or `SPEECH_ADAPTER_NOT_FOUND` — with a string `message`, a string `source`, a standard `type` (`startup`/`operational`/`critical`) and a parseable `timestamp` (plain objects count: the shape is field-based, exactly what `createSpeechError` in this plugin builds). ANY other failure — including a prefixed-but-undeclared code or broken field values — maps to `SPEECH_ADAPTER_INITIALIZATION_FAILED` (type `startup`). These three codes are the plugin's startup-error face toward Core.
+
+## Dependencies
+
+- **Required:** none.
+- **Optional:** none.
 
 ## Public API
 
@@ -85,6 +85,7 @@ These exist only so the UI can show the microphone state; recognized text and au
 | `SPEECH_NO_SPEECH` | The session ended without hearing speech (long silence). | operational |
 | `SPEECH_SERVICE_UNAVAILABLE` | The recognizer service could not run (needs network, missing components, failed to start). | operational |
 | `SPEECH_SESSION_ACTIVE` | A second session was requested while one is active. | operational |
+| `SPEECH_ADAPTER_NOT_FOUND` / `SPEECH_ADAPTER_INVALID` / `SPEECH_ADAPTER_INITIALIZATION_FAILED` | Startup: the configured environment adapter could not be found, is incomplete, or failed to initialize (see the Environment adapter section). | startup |
 | `SERVICE_UNAVAILABLE` | Called after deactivation/shutdown; the running session is cut without a result. | operational |
 
 Raw device errors never leave the adapter; branch on `code`, never on `message`. A code an adapter reports through the session end is honored only when it is one of the codes declared above — anything else (however well-formed) surfaces as `SPEECH_SERVICE_UNAVAILABLE`, so callers never see an undeclared code.
